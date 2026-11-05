@@ -79,7 +79,7 @@ async function main() {
   await waitFor(`http://localhost:${VITE}/`);
 
   const browser = await chromium.launch({ executablePath: edge, headless: true });
-  const page = await browser.newPage({ viewport: { width: 1180, height: 760 } });
+  const page = await browser.newPage({ viewport: { width: 1360, height: 860 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   // the wrong-password attempt in the vault scenario is a deliberate 401
@@ -367,8 +367,242 @@ async function main() {
   const out3 = await result("four-out.pdf");
   check("extract keeps the chosen pages", JSON.stringify(out3.map((p) => p[0])) === JSON.stringify(["p2", "p3"]));
 
+  // 11. Photo editor
+  const wp = (n) => W(n).replace(/\\/g, "/");
+  await pyOut(`from PIL import Image,ImageDraw\nim=Image.new("RGB",(600,400),(40,80,200))\nd=ImageDraw.Draw(im)\nd.rectangle((0,0,299,399),fill=(220,40,40))\nd.rectangle((250,150,350,250),fill=(255,255,255))\nim.save(r"${wp("pic.png")}")`);
+  await goto("photo");
+  await answer(W("pic.png"));
+  await page.click("text=Open a photo…");
+  await page.waitForSelector(".photocanvas img");
+  check("the tool list folds away in the editors", !(await page.locator(".rail").isVisible()));
+  const imgSrc = () => page.locator(".photocanvas > img").getAttribute("src");
+  const natural = () => page.evaluate(() => { const i = document.querySelector(".photocanvas > img"); return [i.naturalWidth, i.naturalHeight]; });
+  const editCount = () => page.locator(".photoside .editlist li").count();
+  const settle = () => page.waitForSelector(".photocanvas > img:not(.loading)", { timeout: 15000 });
+
+  await page.selectOption("#cr-asp", "1:1");
+  await page.waitForSelector(".cropbox");
+  let cb = await page.locator(".cropbox").boundingBox();
+  check("a square crop frame is square on screen", Math.abs(cb.width - cb.height) < 4, JSON.stringify(cb));
+  const se = await page.locator(".handle.se").boundingBox();
+  await page.mouse.move(se.x + 7, se.y + 7);
+  await page.mouse.down();
+  await page.mouse.move(se.x - 60, se.y - 60, { steps: 6 });
+  await page.mouse.up();
+  const cb2 = await page.locator(".cropbox").boundingBox();
+  check("dragging a corner keeps the square and shrinks it", Math.abs(cb2.width - cb2.height) < 4 && cb2.width < cb.width - 20, JSON.stringify([cb, cb2]));
+  await shot("20-photo-crop");
+  await page.click("button:has-text('Apply crop')");
+  await page.waitForSelector("text=Crop to");
+  await settle();
+  const [nw, nh] = await natural();
+  check("the preview shows the cropped square", Math.abs(nw / nh - 1) < 0.02 && nw < 600, `${nw}x${nh}`);
+  await page.click("button[aria-label='Rotate right']");
+  await page.waitForSelector("text=Rotate right 90°");
+
+  await page.click("button[role='tab']:has-text('Adjust')");
+  const srcBeforeAdjust = await imgSrc();
+  await page.locator("#sl-Brightness").fill("40");
+  await page.waitForSelector("text=brightness +40");
+  await page.waitForFunction((b) => document.querySelector(".photocanvas > img").getAttribute("src") !== b, before, { timeout: 10000 });
+  check("adjust sliders change the preview", true);
+
+  await page.click("button[role='tab']:has-text('Filters')");
+  await page.waitForFunction(() => document.querySelectorAll(".filtergrid img").length >= 10, null, { timeout: 15000 });
+  check("every filter shows a thumbnail of this photo", (await page.locator(".filtergrid img").count()) >= 15);
+  await page.click(".filtergrid button:has-text('sepia')");
+  await page.waitForSelector("text=Filter: sepia");
+  await shot("21-photo-filters");
+
+  await page.click("button[role='tab']:has-text('Blur')");
+  const layer = await page.locator(".draglayer").boundingBox();
+  await page.mouse.move(layer.x + layer.width * 0.2, layer.y + layer.height * 0.2);
+  await page.mouse.down();
+  await page.mouse.move(layer.x + layer.width * 0.6, layer.y + layer.height * 0.5, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForSelector(".areabox");
+  await page.click(".tabpanel button:has-text('Apply')");
+  await page.waitForSelector("text=Gaussian blur (area)");
+
+  await page.click("button[role='tab']:has-text('Text')");
+  await page.fill("#tx-text", "Merhaba ğüşİ");
+  const l2 = await page.locator(".draglayer").boundingBox();
+  await page.mouse.click(l2.x + l2.width * 0.5, l2.y + l2.height * 0.8);
+  await page.click("button:has-text('Add text')");
+  await page.waitForSelector("text=Merhaba");
+
+  await page.click("button[role='tab']:has-text('Draw')");
+  await page.click("button[aria-pressed]:has-text('Arrow'), .tabpanel button:has-text('Arrow')");
+  const l3 = await page.locator(".draglayer").boundingBox();
+  await page.mouse.move(l3.x + l3.width * 0.1, l3.y + l3.height * 0.1);
+  await page.mouse.down();
+  await page.mouse.move(l3.x + l3.width * 0.4, l3.y + l3.height * 0.3, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForSelector("text=Draw arrow");
+  await settle();
+  await shot("22-photo-edited");
+
+  const nBefore = await editCount();
+  const shownEdited = await imgSrc();
+  await page.locator("button:has-text('Hold to compare')").dispatchEvent("pointerdown");
+  await page.waitForFunction((b) => document.querySelector(".photocanvas > img").getAttribute("src") !== b, shownEdited, { timeout: 10000 });
+  await page.locator("button:has-text('Hold to compare')").dispatchEvent("pointerup");
+  check("hold to compare shows the original", true);
+  await page.click("button[aria-label='Undo']");
+  check("undo removes the last edit", (await editCount()) === nBefore - 1);
+  await page.keyboard.press("Control+y");
+  check("redo (Ctrl+Y) brings it back", (await editCount()) === nBefore);
+  await page.fill("input[aria-label='Preset name']", "my look");
+  await page.click("button:has-text('Save'):near(input[aria-label='Preset name'])");
+  await page.waitForSelector(".presetlist li:has-text('my look')");
+
+  await page.click("button[role='tab']:has-text('Save')");
+  await page.selectOption("#sv-fmt", "png");
+  await answer(W("pic-edited.png"));
+  await page.click("button:has-text('Save a copy…')");
+  await page.waitForSelector("text=px written to", { timeout: 30000 });
+  const saved = JSON.parse(await pyOut(`from PIL import Image;import json;im=Image.open(r"${wp("pic-edited.png")}");print(json.dumps([im.size[0],im.size[1],im.mode]))`));
+  check("the saved photo is the edited, square, rotated result", saved[0] === saved[1] && saved[0] < 600, JSON.stringify(saved));
+  check("the original photo is untouched", JSON.parse(await pyOut(`from PIL import Image;import json;print(json.dumps(list(Image.open(r"${wp("pic.png")}").size)))`))[0] === 600);
+
+  // 12. PDF editor
+  await doc("edit.pdf", ["Hello world", "Second page"]);
+  await goto("pdfedit");
+  await answer(W("edit.pdf"));
+  await page.click("text=Open a PDF…");
+  await page.waitForSelector(".page.editable img");
+  await page.waitForSelector(".strip img");
+  const box = () => page.locator(".page.editable").boundingBox();
+  let pb = await box();
+  const at = (x, y) => [pb.x + (x / 400) * pb.width, pb.y + (y / 300) * pb.height];
+  const clickAt = async (x, y) => { const [px, py] = at(x, y); await page.mouse.click(px, py); };
+  const dragAt = async (x0, y0, x1, y1) => { const [a, b] = at(x0, y0), [c, d] = at(x1, y1); await page.mouse.move(a, b); await page.mouse.down(); await page.mouse.move(c, d, { steps: 6 }); await page.mouse.up(); };
+  const idle = () => page.waitForSelector(".preview:not(.loading)", { timeout: 15000 });
+
+  await page.click("button[aria-label='Text']");
+  await clickAt(100, 200);
+  await page.waitForSelector("#pe-prompt");
+  await page.fill("#pe-prompt", "Çalışma ğ");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("text=Çalışma ğ”");
+  await idle();
+  await page.click("button[aria-label='Highlight']");
+  await dragAt(55, 100, 170, 125);
+  await page.waitForSelector(".pdfside >> text=Highlight");
+  await page.click("button[aria-label='Box']");
+  await dragAt(220, 40, 320, 90);
+  await page.waitForSelector(".pdfside >> text=Box");
+  await page.click("button[aria-label='Text']");
+  await page.click(".stamps button:has-text('APPROVED')");
+  await clickAt(250, 250);
+  await page.waitForSelector("text=APPROVED”");
+  await idle();
+  await shot("23-pdf-editor");
+
+  await page.click("button[aria-label='Select']");
+  await clickAt(110, 205);
+  await page.waitForSelector("h2:has-text('Selected text')");
+  const [mx, my] = at(110, 205), [mx2, my2] = at(110, 245);
+  await page.mouse.move(mx, my);
+  await page.mouse.down();
+  await page.mouse.move(mx2, my2, { steps: 6 });
+  await page.mouse.up();
+  await idle();
+  await clickAt(270, 65);
+  await page.keyboard.press("Delete");
+  await page.waitForFunction(() => !document.querySelector(".pdfside .editlist")?.innerText.includes("Box"));
+  check("select, drag and Delete work on the page", true);
+
+  await page.click("button[aria-label^='Page 2']");
+  await page.waitForSelector("img[alt='Page 2']");
+  await page.click("button[aria-label='Note']");
+  pb = await box();
+  await clickAt(50, 50);
+  await page.fill("#pe-prompt", "kontrol et");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("text=Note “kontrol et”");
+  await page.click("button[aria-label^='Page 1']");
+  await page.waitForSelector("img[alt='Page 1']");
+  pb = await box();
+  await page.click("button[aria-label='Link']");
+  await dragAt(55, 100, 170, 130);
+  await page.fill("#pe-prompt", "example.com");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("text=Link to example.com");
+  const nOps = await page.locator(".pdfside .editlist li").count();
+  await page.keyboard.press("Control+z");
+  check("Ctrl+Z undoes the last PDF edit", (await page.locator(".pdfside .editlist li").count()) === nOps - 1);
+  await page.keyboard.press("Control+y");
+  await answer(W("edit-out.pdf"));
+  await page.click("button:has-text('Save a copy…')");
+  await page.waitForSelector("text=pages written", { timeout: 30000 });
+  const out = JSON.parse(await pyOut(`import pymupdf,json\nd=pymupdf.open(r"${wp("edit-out.pdf")}")\np=d[0];q=d[1]\nw=p.search_for("Çalışma ğ")\nprint(json.dumps({"t1":p.get_text(),"annots":[a.type[1] for a in p.annots()],"links":[l.get("uri") for l in p.get_links()],"y":w[0].y0 if w else None,"stamp":"APPROVED" in p.get_text(),"note":[a.info["content"] for a in q.annots()]}))`));
+  check("the saved PDF has the text, searchable with Turkish letters", out.t1.includes("Çalışma ğ") && out.y !== null, JSON.stringify(out));
+  check("the text was moved by the drag (about 40 points down)", out.y > 225 && out.y < 255, String(out.y));
+  check("highlight, link, stamp and note all made it into the file", out.annots.includes("Highlight") && !out.annots.includes("Square") && out.links.includes("https://example.com") && out.stamp && out.note[0] === "kontrol et", JSON.stringify(out));
+
+  // 13. PDF page tools
+  await goto("pagenums");
+  await answer(W("edit.pdf"));
+  await page.click("button:has-text('Choose…')");
+  await page.waitForSelector("text=This page will be stamped");
+  await shot("24-pagenumbers");
+  await answer(W("numbered.pdf"));
+  await page.click("button:has-text('Save to…')");
+  await page.waitForSelector("text=pages written", { timeout: 30000 });
+  const numbered = JSON.parse(await pyOut(`import pymupdf,json\nd=pymupdf.open(r"${wp("numbered.pdf")}")\nprint(json.dumps([p.get_text() for p in d]))`));
+  check("page numbers are written as 1 / 2 and 2 / 2", numbered[0].includes("1 / 2") && numbered[1].includes("2 / 2"), JSON.stringify(numbered));
+
+  await goto("props");
+  await answer(W("four.pdf"));
+  await page.click("button:has-text('Choose…')");
+  await page.waitForSelector("#pr-title");
+  await page.fill("#pr-title", "Ünite Kitabı");
+  await page.click("button:has-text('Add bookmark')");
+  await page.fill("input[aria-label='Title']", "Başlangıç");
+  await answer(W("props.pdf"));
+  await page.click("button:has-text('Save to…')");
+  await page.waitForSelector("text=pages written", { timeout: 30000 });
+  const props = JSON.parse(await pyOut(`import pymupdf,json\nd=pymupdf.open(r"${wp("props.pdf")}")\nprint(json.dumps({"title":d.metadata["title"],"toc":d.get_toc()}))`));
+  check("title and bookmark are saved", props.title === "Ünite Kitabı" && props.toc[0][1] === "Başlangıç", JSON.stringify(props));
+
+  await pyOut(`import pymupdf\nd=pymupdf.open()\np=d.new_page(width=400,height=300)\nfor i,(n,t) in enumerate((("full_name",pymupdf.PDF_WIDGET_TYPE_TEXT),("agree",pymupdf.PDF_WIDGET_TYPE_CHECKBOX))):\n  w=pymupdf.Widget();w.field_name=n;w.field_type=t;w.rect=pymupdf.Rect(60,40+i*40,260,62+i*40);p.add_widget(w)\nd.save(r"${wp("form.pdf")}")`);
+  await goto("forms");
+  await answer(W("form.pdf"));
+  await page.click("button:has-text('Choose…')");
+  await page.waitForSelector("#fm-full_name");
+  await page.fill("#fm-full_name", "Ayşe Yılmaz");
+  await page.check("text=agree");
+  await answer(W("filled.pdf"));
+  await page.click("button:has-text('Save to…')");
+  await page.waitForSelector("text=pages written", { timeout: 30000 });
+  const filled = JSON.parse(await pyOut(`import pymupdf,json\nd=pymupdf.open(r"${wp("filled.pdf")}")\nprint(json.dumps({w.field_name:str(w.field_value) for w in d[0].widgets()}))`));
+  check("form answers are saved", filled.full_name === "Ayşe Yılmaz" && filled.agree !== "Off", JSON.stringify(filled));
+
+  await goto("export");
+  await answer(W("four.pdf"));
+  await page.locator("button:has-text('Choose…')").nth(0).click();
+  await page.waitForSelector("text=4 pages");
+  fs.mkdirSync(W("imgs"));
+  await answer(W("imgs"));
+  await page.locator("button:has-text('Choose…')").nth(1).click();
+  await page.click("button.primary:has-text('Export')");
+  await page.waitForSelector("text=file(s) written", { timeout: 30000 });
+  check("every page is exported as a picture", fs.readdirSync(W("imgs")).length === 4);
+
+  await goto("addsplit");
+  await page.click("button:has-text('Split into files')");
+  await answer(W("four.pdf"));
+  await page.locator("button:has-text('Choose…')").nth(0).click();
+  fs.mkdirSync(W("parts"));
+  await answer(W("parts"));
+  await page.locator("button:has-text('Choose…')").nth(1).click();
+  await page.click("button.primary:has-text('Split')");
+  await page.waitForSelector("text=file(s) written", { timeout: 30000 });
+  check("a 4-page PDF split every 2 pages gives two files", fs.readdirSync(W("parts")).length === 2);
+
   // 10. Remaining screens at least render without console errors
-  for (const id of ["split", "organize", "convert", "protect", "watermark", "redact", "ocr", "images", "video", "background", "upscale", "transcribe", "autopilot"]) {
+  for (const id of ["pdfedit", "photo", "pagesize", "finish", "split", "organize", "convert", "protect", "watermark", "redact", "ocr", "images", "video", "background", "upscale", "transcribe", "autopilot"]) {
     await goto(id);
     await page.waitForSelector("h1");
   }

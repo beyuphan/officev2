@@ -37,7 +37,7 @@ export function describeJob(job: Job): Msg {
     if (r.skipped?.length) parts.push(`${r.skipped.length} skipped (${r.skipped[0].reason})`);
     if (r.language) parts.push(`language: ${r.language}`);
   } else if (r.output) {
-    parts.push(`${r.pages} pages written to ${r.output}`);
+    parts.push(r.width && r.height ? `${r.width} × ${r.height} px written to ${r.output}` : `${r.pages} pages written to ${r.output}`);
     if (r.words != null) parts.push(`${r.words} words recognized${r.engine ? ` (${r.engine})` : ""}`);
     if (r.redactions != null) parts.push(`${r.redactions} redactions`);
     if (r.before_bytes != null) parts.push(`${formatBytes(r.before_bytes)} → ${formatBytes(r.after_bytes)}`);

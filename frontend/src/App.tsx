@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Aperture,
   Braces,
   ClipboardList,
   Combine,
   Cpu,
   Eraser,
   EyeOff,
+  Crop,
+  FileDown,
   FileOutput,
+  FilePenLine,
+  FilePlus,
   Film,
   HardDrive,
   History,
+  Hash,
   Image as ImageIcon,
+  Info,
   ImageMinus,
   KeyRound,
+  Layers,
   Library,
   ListOrdered,
   Lock,
@@ -23,6 +31,7 @@ import {
   ScanText,
   Scissors,
   Stamp,
+  TextCursorInput,
   Type,
   Undo2,
   Workflow,
@@ -40,24 +49,37 @@ import { Vault } from "./views/vault";
 import { DevLab, TextTools } from "./views/utils";
 import { Clipboard, ScreenTools } from "./views/desk";
 import { TitleBar } from "./titlebar";
+import { PhotoEditor } from "./views/photo";
+import { PdfEditor } from "./views/pdfeditor";
+import { AddSplit, ExportContent, Finish, Forms, PageNumbers, PageSize, Properties } from "./views/pdftools";
 import "./App.css";
 import "./forms.css";
+import "./editors.css";
 
 type ViewDef = { id: string; label: string; group: string; Icon: LucideIcon; keywords?: string };
 
 const VIEWS: ViewDef[] = [
-  { id: "merge", label: "Merge", group: "Documents", Icon: Combine, keywords: "pdf combine join" },
-  { id: "split", label: "Extract pages", group: "Documents", Icon: Scissors, keywords: "pdf split pages" },
-  { id: "organize", label: "Organize pages", group: "Documents", Icon: ListOrdered, keywords: "pdf reorder rotate" },
-  { id: "convert", label: "Convert", group: "Documents", Icon: FileOutput, keywords: "word docx office compress metadata" },
-  { id: "protect", label: "Protect", group: "Documents", Icon: Lock, keywords: "pdf password encrypt unlock" },
-  { id: "watermark", label: "Watermark", group: "Documents", Icon: Stamp, keywords: "pdf stamp logo signature" },
-  { id: "redact", label: "Redact", group: "Documents", Icon: EyeOff, keywords: "pdf black out remove text" },
-  { id: "ocr", label: "Recognize text", group: "Documents", Icon: ScanText, keywords: "ocr scan searchable" },
-  { id: "images", label: "Images", group: "Media", Icon: ImageIcon, keywords: "compress webp jpeg convert exif" },
-  { id: "video", label: "Video", group: "Media", Icon: Film, keywords: "compress mp4 ffmpeg" },
-  { id: "background", label: "Remove background", group: "Media", Icon: ImageMinus, keywords: "transparent png cutout" },
-  { id: "upscale", label: "Upscale", group: "Media", Icon: Maximize2, keywords: "enlarge resolution esrgan" },
+  { id: "pdfedit", label: "PDF editor", group: "PDF", Icon: FilePenLine, keywords: "pdf edit add text signature image highlight draw note link erase annotate sign stamp" },
+  { id: "merge", label: "Merge", group: "PDF", Icon: Combine, keywords: "pdf combine join" },
+  { id: "split", label: "Extract pages", group: "PDF", Icon: Scissors, keywords: "pdf split pages" },
+  { id: "organize", label: "Organize pages", group: "PDF", Icon: ListOrdered, keywords: "pdf reorder rotate delete duplicate" },
+  { id: "addsplit", label: "Add and split", group: "PDF", Icon: FilePlus, keywords: "pdf insert blank pages split files bookmarks" },
+  { id: "pagenums", label: "Page numbers", group: "PDF", Icon: Hash, keywords: "pdf header footer bates numbering" },
+  { id: "pagesize", label: "Page size", group: "PDF", Icon: Crop, keywords: "pdf crop margins paper a4 letter resize" },
+  { id: "redact", label: "Redact", group: "PDF", Icon: EyeOff, keywords: "pdf black out remove text" },
+  { id: "watermark", label: "Watermark", group: "PDF", Icon: Stamp, keywords: "pdf stamp logo signature" },
+  { id: "protect", label: "Protect", group: "PDF", Icon: Lock, keywords: "pdf password encrypt unlock" },
+  { id: "ocr", label: "Recognize text", group: "PDF", Icon: ScanText, keywords: "ocr scan searchable" },
+  { id: "convert", label: "Convert", group: "PDF", Icon: FileOutput, keywords: "word docx office compress metadata" },
+  { id: "export", label: "Export content", group: "PDF", Icon: FileDown, keywords: "pdf to images jpg png extract pictures text markdown images to pdf" },
+  { id: "forms", label: "Forms", group: "PDF", Icon: TextCursorInput, keywords: "pdf fill form fields" },
+  { id: "props", label: "Properties", group: "PDF", Icon: Info, keywords: "pdf metadata title author bookmarks outline" },
+  { id: "finish", label: "Flatten", group: "PDF", Icon: Layers, keywords: "pdf flatten annotations grayscale black white" },
+  { id: "photo", label: "Photo editor", group: "Photo and video", Icon: Aperture, keywords: "photo edit crop rotate straighten blur filter adjust brightness contrast text draw resize effects" },
+  { id: "images", label: "Batch convert", group: "Photo and video", Icon: ImageIcon, keywords: "compress webp jpeg convert exif bulk" },
+  { id: "background", label: "Remove background", group: "Photo and video", Icon: ImageMinus, keywords: "transparent png cutout" },
+  { id: "upscale", label: "Upscale", group: "Photo and video", Icon: Maximize2, keywords: "enlarge resolution esrgan" },
+  { id: "video", label: "Video", group: "Photo and video", Icon: Film, keywords: "compress mp4 ffmpeg" },
   { id: "transcribe", label: "Transcribe", group: "Intelligence", Icon: Mic, keywords: "whisper speech audio subtitles srt" },
   { id: "documents", label: "Documents", group: "Intelligence", Icon: Library, keywords: "ask chat rag search index semantic" },
   { id: "models", label: "Models", group: "Intelligence", Icon: Cpu, keywords: "download ai install" },
@@ -92,12 +114,16 @@ export default function App() {
   const [engineError, setEngineError] = useState("");
   const [view, setView] = useState<string>(() => {
     const h = window.location.hash.slice(1);
-    return VIEWS.some((v) => v.id === h) ? h : "merge";
+    return VIEWS.some((v) => v.id === h) ? h : "pdfedit";
   });
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loadError, setLoadError] = useState("");
   const [palette, setPalette] = useState(false);
+  const immersive = view === "photo" || view === "pdfedit";
+  const [railOpen, setRailOpen] = useState(!immersive);
+  // the editors want the whole window: the tool list folds away when one opens and returns when you leave it
+  useEffect(() => setRailOpen(!immersive), [immersive]);
 
   const refresh = useCallback(async () => {
     try {
@@ -143,8 +169,8 @@ export default function App() {
 
   return (
     <div className="app">
-    <TitleBar tool={current.label} />
-    <div className="shell">
+    <TitleBar tool={current.label} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} />
+    <div className={`shell ${railOpen ? "" : "norail"}`}>
       <nav className="rail" aria-label="Tools">
         <button className="palette-hint" onClick={() => setPalette(true)} aria-label="Open command palette">
           <span>Search tools</span>
@@ -164,7 +190,7 @@ export default function App() {
       </nav>
 
       <main>
-        <div className="sheet">
+        <div className={`sheet ${immersive ? "fill" : ""}`}>
           {engine === "error" && <p className="msg bad">{engineError}</p>}
           {engine === "starting" && <p className="muted">Starting the local engine…</p>}
           {engine === "ready" && loadError && <p className="msg bad">{loadError}</p>}
@@ -213,6 +239,24 @@ function ViewSwitch({
   history: HistoryEntry[];
 }) {
   switch (id) {
+    case "pdfedit":
+      return <PdfEditor onDone={refresh} />;
+    case "photo":
+      return <PhotoEditor onDone={refresh} />;
+    case "pagenums":
+      return <PageNumbers onDone={refresh} />;
+    case "pagesize":
+      return <PageSize onDone={refresh} />;
+    case "addsplit":
+      return <AddSplit onDone={refresh} />;
+    case "export":
+      return <ExportContent onDone={refresh} />;
+    case "forms":
+      return <Forms onDone={refresh} />;
+    case "props":
+      return <Properties onDone={refresh} />;
+    case "finish":
+      return <Finish onDone={refresh} />;
     case "merge":
       return <Merge onDone={refresh} />;
     case "split":
@@ -338,6 +382,22 @@ const TYPE_LABEL: Record<string, string> = {
   "pdf.clean_metadata": "Clean metadata",
   "pdf.to_docx": "PDF to Word",
   "pdf.from_office": "Office to PDF",
+  "photo.export": "Save edited photo",
+  "photo.batch": "Edit many photos",
+  "pdf.edit": "Edit PDF",
+  "pdf.stamp": "Page numbers and headers",
+  "pdf.crop": "Crop pages",
+  "pdf.resize": "Change paper size",
+  "pdf.insert": "Insert pages",
+  "pdf.split_parts": "Split PDF",
+  "pdf.extract_images": "Extract pictures",
+  "pdf.to_images": "Pages to pictures",
+  "pdf.from_images": "Pictures to PDF",
+  "pdf.extract_text": "Extract text",
+  "pdf.flatten": "Flatten PDF",
+  "pdf.grayscale": "Grayscale PDF",
+  "pdf.fill_form": "Fill form",
+  "pdf.set_props": "Edit properties",
   "media.images": "Convert images",
   "media.video": "Convert video",
   "media.remove_background": "Remove background",

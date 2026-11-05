@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Copy, Minus, Square, X } from "lucide-react";
+import { Copy, Minus, PanelLeft, Square, X } from "lucide-react";
 
 /** The native window frame is turned off, so the app draws its own title bar and window buttons. */
 function useAppWindow() {
@@ -13,7 +13,7 @@ function useAppWindow() {
   }, []);
 }
 
-export function TitleBar({ tool }: { tool: string }) {
+export function TitleBar({ tool, railOpen, onToggleRail }: { tool: string; railOpen: boolean; onToggleRail: () => void }) {
   const win = useAppWindow();
   const [maximized, setMaximized] = useState(false);
 
@@ -28,6 +28,9 @@ export function TitleBar({ tool }: { tool: string }) {
 
   return (
     <header className="titlebar" data-tauri-drag-region onDoubleClick={() => void win?.toggleMaximize()}>
+      <button className="tb-rail" aria-label={railOpen ? "Hide the tool list" : "Show the tool list"} aria-pressed={railOpen} onClick={onToggleRail} onDoubleClick={(e) => e.stopPropagation()}>
+        <PanelLeft size={16} strokeWidth={1.5} />
+      </button>
       <div className="tb-brand">
         <span className="tb-name">officev2</span>
         <span className="tb-sep" aria-hidden>

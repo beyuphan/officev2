@@ -29,7 +29,7 @@ Long-lived desktop app with tray, global hotkeys and a command palette (planned)
 
 ## Capabilities and Constraints
 
-- Implemented now: PDF merge, extract pages, encrypt (AES-256) and unlock (password required), text/image watermark, OCR to searchable PDF (Windows OCR or RapidOCR), job history, undo (moves created files to a trash folder, never deletes), settings store.
+- Implemented now: a full PDF editor and page tools, a photo editor, image and video tools, speech-to-text, document search, vault, file tools with undo, clipboard history, screen tools. See README.md.
 - Planned: command palette, rule engine, media tools, clipboard manager, local RAG, vault, model manager.
 - Constraints: offline; the UI talks to the sidecar over HTTP with a bearer token; file paths are limited to user-approved roots; destructive actions need dry-run and undo.
 - Terminology used in code: Job, Activity, Undo, Module.

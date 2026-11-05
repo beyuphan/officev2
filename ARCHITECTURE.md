@@ -158,3 +158,29 @@ Windows is the primary target. OS-specific code (clipboard formats, screen captu
 - `sqlite-vec` vs LanceDB maturity at the expected index sizes.
 - Whether to adopt the LocalSend protocol for LocalDrop or drop the feature.
 - Whether the Vault should wrap an existing tool (`age`, VeraCrypt) instead of a custom container.
+
+
+## 15. Photo editing engine
+
+`backend/localflow/modules/photo/` renders an **edit list**: a list of operations (crop, rotate, adjust, blur, text, ...) applied in order to the photo.
+
+- Geometry is normalized (0..1 of the image at that step) and every pixel length is in pixels of the original image. Each pixel length is multiplied by `scale`, the ratio of the working image to the original, so a small preview and the full-resolution export show the same picture. A test measures the difference between the two.
+- The UI sorts edits by stage (geometry, privacy blur, tone, filter, finish, drawing, frame) before sending them, so a tone change never recolors text.
+- Previews work on a cached, downscaled copy of the photo; export and batch run as jobs on the full file.
+- `result_size` is computed without rendering, and a test checks it against real exports for every geometry edit (including Pillow's exact rounding for arbitrary rotation angles).
+
+## 16. PDF editor engine
+
+`backend/localflow/modules/pdf/edit.py` adds content on top of pages: text, images, markup, shapes, notes, links, erase and redact, plus page-level tools (headers and page numbers, crop, resize, insert, split, extraction, forms, properties).
+
+- All coordinates are in the page **as displayed** (points, origin top-left, after the page rotation). The engine converts to PDF space, so everything is correct on rotated pages; tests cover 0, 90, 180 and 270 degrees.
+- Erase and redact run first because they delete content; everything else is added afterwards.
+- The preview endpoint applies the same code to an in-memory copy of one page and returns where each edit sits, which the UI uses for selecting and moving edits.
+
+### Text that stays searchable
+
+Many Windows fonts draw several characters with one shared glyph (space and non-breaking space, hyphen and soft hyphen, semicolon and Greek question mark). When such a font is embedded, PDF readers extract the other character, so searching a document for `REF-0006` finds nothing. `pdf/textwrite.py` measures once per font file which characters come back wrong and writes only those with the matching built-in font (Helvetica, Times or Courier), in strict left-to-right order so extraction keeps one line. Page numbers, edits and watermarks all go through it.
+
+## 17. Window and layout
+
+The native window frame is disabled; the shell draws its own title bar (drag region, minimize, maximize, close) and the tool list can be folded away. The two editors fold it automatically so they use the whole window. The end-to-end suite caught the layout bugs this introduced (a collapsed grid column, a zero-height editor) by measuring real element boxes.

@@ -11,6 +11,8 @@ export type PageData = {
   page_width: number;
   page_height: number;
   stamped?: boolean;
+  /** Where each edit sits on this page, by position in the edit list (PDF editor previews). */
+  boxes?: { index: number; rect: number[] }[];
 };
 
 type Rendered = { data: PageData | null; loading: boolean; error: string };
@@ -166,6 +168,7 @@ export function PagePreview({
   page,
   onPage,
   boxes,
+  boxesFor,
   onBoxClick,
   onDraw,
   extra,
@@ -175,6 +178,8 @@ export function PagePreview({
   page: number;
   onPage: (p: number) => void;
   boxes?: Box[];
+  /** Boxes computed from the page being shown (its size, page number). */
+  boxesFor?: (d: PageData) => Box[];
   onBoxClick?: (id: string) => void;
   onDraw?: (rect: [number, number, number, number]) => void;
   extra?: { url: string; body: object; delay?: number };
@@ -194,7 +199,7 @@ export function PagePreview({
   return (
     <div className={loading ? "preview loading" : "preview"}>
       <PageNav page={page} total={shown.total} onChange={onPage} />
-      <PageCanvas data={shown} boxes={boxes} onBoxClick={onBoxClick} onDraw={onDraw} note={note?.(shown)} />
+      <PageCanvas data={shown} boxes={boxesFor ? boxesFor(shown) : boxes} onBoxClick={onBoxClick} onDraw={onDraw} note={note?.(shown)} />
     </div>
   );
 }
