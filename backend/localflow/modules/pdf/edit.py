@@ -20,6 +20,7 @@ from PIL import Image, ImageOps
 from ... import jobctl
 from ...fonts import font_path
 from .ops import _open_for_view, _render, _select_pages, parse_page_ranges
+from .textwrite import put_line
 
 PAGE_SIZES = {"A3": (842, 1191), "A4": (595, 842), "A5": (420, 595), "Letter": (612, 792), "Legal": (612, 1008)}
 
@@ -85,10 +86,10 @@ def _page_of(doc: "pymupdf.Document", op: dict) -> "pymupdf.Page":
     return doc[n - 1]
 
 
-def _font(op: dict) -> tuple["pymupdf.Font", float, float]:
+def _font(op: dict) -> tuple["pymupdf.Font", float, float, str | None]:
     path = font_path(str(op.get("font", "Arial")), bool(op.get("bold")), bool(op.get("italic")))
     font = pymupdf.Font(fontfile=path) if path else pymupdf.Font("helv")
-    return font, font.ascender, font.descender
+    return font, font.ascender, font.descender, path
 
 
 def _wrap(text: str, font: "pymupdf.Font", size: float, width: float | None) -> list[str]:
@@ -122,7 +123,7 @@ def _op_text(doc, op) -> list[float]:
     if len(text) > 5000:
         raise ValueError("the text is too long")
     size = _f(op, "size", 14, 2, 400)
-    font, asc, desc = _font(op)
+    font, asc, desc, fontfile = _font(op)
     width = _f(op, "width", 0, 0, 5000) or None
     lines = _wrap(text, font, size, width)
     line_h = (asc - desc) * size
@@ -157,9 +158,7 @@ def _op_text(doc, op) -> list[float]:
             continue
         off = {"left": 0.0, "center": (box_w - widths[i]) / 2, "right": box_w - widths[i]}.get(align, 0.0)
         origin = _to_pdf_pt(page, *local_to_shown(off, i * line_h + asc * size))
-        tw = pymupdf.TextWriter(page.rect, opacity=opacity, color=color)
-        tw.append(origin, line, font=font, fontsize=size)
-        tw.write_text(page, morph=(origin, pymupdf.Matrix(comp - theta)))
+        put_line(page, origin, line, font, fontfile, size, color, opacity, comp - theta)
 
     corners = [local_to_shown(*c) for c in ((0, 0), (box_w, 0), (box_w, box_h), (0, box_h))]
     xs, ys = [c[0] for c in corners], [c[1] for c in corners]
@@ -238,7 +237,10 @@ def _op_shape(doc, op) -> list[float]:
         strokes = op.get("strokes")
         if not strokes or not all(len(s) >= 2 for s in strokes):
             raise ValueError("draw a line first")
-        pts = [[_to_pdf_pt(page, float(x), float(y)) for x, y in s] for s in strokes]
+        pts = []
+        for line_pts in strokes:
+            conv = [_to_pdf_pt(page, float(x), float(y)) for x, y in line_pts]
+            pts.append([(q.x, q.y) for q in conv])
         annot = page.add_ink_annot(pts)
         annot.set_colors(stroke=stroke)
         flat = [p for s in strokes for p in s]
@@ -360,7 +362,7 @@ def _tokens(template: str, n: int, total: int, name: str) -> str:
     return out.replace("{total}", str(total)).replace("{file}", name).replace("{date}", time.strftime("%Y-%m-%d"))
 
 
-def _stamp_page(page, items: list[dict], n: int, total: int, name: str, size: float, margin: float, color, font, opacity: float) -> None:
+def _stamp_page(page, items: list[dict], n: int, total: int, name: str, size: float, margin: float, color, font, opacity: float, fontfile: str | None = None) -> None:
     r = page.rect
     asc = font.ascender
     for item in items:
@@ -374,9 +376,7 @@ def _stamp_page(page, items: list[dict], n: int, total: int, name: str, size: fl
         x = {"left": margin, "center": (r.width - w) / 2, "right": r.width - margin - w}[pos.split("-")[1]]
         y = margin + asc * size if pos.startswith("top") else r.height - margin - (-font.descender) * size
         origin = _to_pdf_pt(page, x, y)
-        tw = pymupdf.TextWriter(page.rect, opacity=opacity, color=color)
-        tw.append(origin, text, font=font, fontsize=size)
-        tw.write_text(page, morph=(origin, pymupdf.Matrix(page.rotation)))
+        put_line(page, origin, text, font, fontfile, size, color, opacity, page.rotation)
 
 
 def stamp_pages(
@@ -403,7 +403,7 @@ def stamp_pages(
             raise ValueError("the document is password protected; unlock it first")
         chosen = _select_pages(doc, pages_spec)
         for k, i in enumerate(chosen):
-            _stamp_page(doc[i], items, start_at + i, doc.page_count + start_at - 1, name, size, margin, _rgb(color), font, opacity)
+            _stamp_page(doc[i], items, start_at + i, doc.page_count + start_at - 1, name, size, margin, _rgb(color), font, opacity, path)
         doc.save(output, garbage=3, deflate=True)
         return {"output": output, "pages": doc.page_count, "stamped": len(chosen)}
 
@@ -419,7 +419,7 @@ def preview_stamp(path: str, page: int, items: list[dict], password: str | None 
         stamped = (page - 1) in _select_pages(doc, spec)
         if stamped:
             _stamp_page(doc[page - 1], items, start_at + page - 1, doc.page_count + start_at - 1, Path(path).stem,
-                        float(kw.get("size", 10)), float(kw.get("margin", 28)), _rgb(kw.get("color", "#444444")), font, float(kw.get("opacity", 1)))
+                        float(kw.get("size", 10)), float(kw.get("margin", 28)), _rgb(kw.get("color", "#444444")), font, float(kw.get("opacity", 1)), fp)
         return {"page": page, "total": doc.page_count, "stamped": stamped, **_render(doc[page - 1], width)}
 
 

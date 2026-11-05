@@ -86,14 +86,20 @@ def _select_pages(doc: "pymupdf.Document", pages_spec: str | None) -> list[int]:
     return parse_page_ranges(pages_spec, doc.page_count) if pages_spec else list(range(doc.page_count))
 
 
-def _stamp_text(page, text, opacity, angle, font_size, color, font) -> None:
+def _stamp_text(page, text, opacity, angle, font_size, color, font, fontfile=None) -> None:
+    from .textwrite import put_line
+
     rect = page.rect
     width = font.text_length(text, fontsize=font_size)
     center = pymupdf.Point(rect.width / 2, rect.height / 2)
     origin = pymupdf.Point(center.x - width / 2, center.y + font_size * 0.3)
-    tw = pymupdf.TextWriter(rect, opacity=opacity, color=color)
-    tw.append(origin, text, font=font, fontsize=font_size)
-    tw.write_text(page, morph=(center, pymupdf.Matrix(angle)))
+    # rotate about the page center, not about the text origin
+    import math
+
+    a = math.radians(angle)
+    dx, dy = origin.x - center.x, origin.y - center.y
+    rotated = pymupdf.Point(center.x + dx * math.cos(a) + dy * math.sin(a), center.y - dx * math.sin(a) + dy * math.cos(a))
+    put_line(page, rotated, text, font, fontfile, font_size, color, opacity, angle)
 
 
 def _stamp_image(page, image_path, x, y, width, from_bottom_right=True) -> None:
@@ -120,7 +126,7 @@ def watermark_text(
     font = _unicode_font()
     with pymupdf.open(input_path) as doc:
         for i in _select_pages(doc, pages_spec):
-            _stamp_text(doc[i], text, opacity, angle, font_size, color, font)
+            _stamp_text(doc[i], text, opacity, angle, font_size, color, font, _unicode_font_path())
         doc.save(output, garbage=3, deflate=True)
         return {"output": output, "pages": doc.page_count}
 
@@ -143,16 +149,21 @@ def watermark_image(
         return {"output": output, "pages": doc.page_count}
 
 
-def _unicode_font() -> "pymupdf.Font":
-    """A font that covers Turkish and other Latin-extended glyphs; Helvetica as last resort."""
+def _unicode_font_path() -> str | None:
+    """A font file that covers Turkish and other Latin-extended glyphs, or None."""
     for candidate in (
-        r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fontsrial.ttf",
         "/Library/Fonts/Arial.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ):
         if Path(candidate).is_file():
-            return pymupdf.Font(fontfile=candidate)
-    return pymupdf.Font("helv")
+            return candidate
+    return None
+
+
+def _unicode_font() -> "pymupdf.Font":
+    path = _unicode_font_path()
+    return pymupdf.Font(fontfile=path) if path else pymupdf.Font("helv")
 
 
 # A recognized text line: (x0, y0, x1, y1, text) in pixel coordinates of the rendered page.
@@ -585,7 +596,7 @@ def preview_watermark(
             if kind == "text":
                 if not (text or "").strip():
                     raise ValueError("watermark text is empty")
-                _stamp_text(doc[page - 1], text, opacity, angle, font_size, (0.6, 0.0, 0.0), _unicode_font())
+                _stamp_text(doc[page - 1], text, opacity, angle, font_size, (0.6, 0.0, 0.0), _unicode_font(), _unicode_font_path())
             else:
                 if not image_path:
                     raise ValueError("choose an image")
