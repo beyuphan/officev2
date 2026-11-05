@@ -31,7 +31,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--signal); outline-of
 .photo { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; height: 100%; min-height: 0; }
 .phototop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .phototop button { display: inline-flex; align-items: center; gap: 6px; }
-.photomain { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; min-height: 0; }
+.photomain { display: grid; grid-template-columns: 88px minmax(0, 1fr) 330px; gap: 12px; min-height: 0; }
 .photostage { position: relative; display: flex; align-items: center; justify-content: center; min-height: 0; overflow: hidden; border: 1px solid var(--rule); background-color: #d9dcd2; background-image: linear-gradient(45deg, #cfd2c8 25%, transparent 25%, transparent 75%, #cfd2c8 75%), linear-gradient(45deg, #cfd2c8 25%, transparent 25%, transparent 75%, #cfd2c8 75%); background-size: 16px 16px; background-position: 0 0, 8px 8px; }
 .photocanvas { position: relative; display: inline-block; line-height: 0; max-width: 100%; max-height: 100%; touch-action: none; user-select: none; }
 .photocanvas > img { display: block; max-width: 100%; max-height: calc(100vh - 150px); user-select: none; -webkit-user-drag: none; box-shadow: 0 2px 12px rgb(27 31 36 / 0.25); }
@@ -80,41 +80,115 @@ input[type="range"]:focus-visible { outline: 2px solid var(--signal); outline-of
 .photoside .inline input { flex: 1; min-width: 0; }
 
 /* ---- PDF editor ---- */
-.pdfedit { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; height: 100%; min-height: 0; }
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
-.toolbar button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; font-size: 12.5px; }
-.pdfmain { display: grid; grid-template-columns: 86px minmax(0, 1fr) 310px; gap: 12px; min-height: 0; }
+.pdfedit { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 8px; height: 100%; min-height: 0; }
+.pdfedit:not(:has(.pdfstatus)) { grid-template-rows: auto auto minmax(0, 1fr); }
+.pdftop { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pdftop .zoomval { min-width: 52px; font-variant-numeric: tabular-nums; }
+.flatten { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink-2); }
+.pdfstatus { margin: 0; }
+.pdfstatus .msg { margin: 0; }
+
+.ctxbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--rule); background: var(--panel); font-size: 12.5px; }
+.ctxlabel { font-weight: 700; letter-spacing: 0.02em; padding-right: 10px; border-right: 1px solid var(--rule-soft); }
+.ctxhint { color: var(--ink-2); }
+.ctl { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.ctl input[type="color"] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--rule); background: #fff; cursor: pointer; }
+.ctl input[type="range"] { width: 96px; }
+.ctl output { min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }
+.ctxbar select { min-width: 140px; max-width: 190px; }
+.ctltext { flex: 1; min-width: 220px; width: auto; }
+.stepper { display: inline-flex; align-items: center; }
+.stepper input { width: 54px; text-align: center; }
+.stepper button { padding: 4px 9px; }
+.fmt { width: 30px; justify-content: center; }
+.ctxbar .stamps { margin: 0; }
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.danger:hover:not(:disabled) { background: var(--bad); color: #fff; }
+.ctxbar button, .pdftop button { display: inline-flex; align-items: center; gap: 5px; }
+
+.pdfmain { display: grid; grid-template-columns: 88px 82px minmax(0, 1fr); gap: 10px; min-height: 0; }
+.toolrail { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; padding-right: 2px; }
+.toolgroup { display: flex; flex-direction: column; gap: 2px; }
+.grouptitle { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-2); padding: 0 2px 2px; border-bottom: 1px solid var(--rule-soft); margin-bottom: 2px; }
+.toolrail button { display: flex; align-items: center; gap: 7px; width: 100%; padding: 6px 7px; font-size: 12.5px; text-align: left; border: 1px solid transparent; background: transparent; border-radius: 0; color: var(--ink); }
+.toolrail button:hover:not(.on) { background: #e3e5dc; border-color: var(--rule-soft); }
+.toolrail button.on, .toolrail button.on:hover:not(:disabled) { background: var(--ink); color: var(--panel); border-color: var(--ink); }
 .strip { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; padding-right: 2px; }
 .strip button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--rule-soft); border-radius: 0; background: transparent; color: var(--ink); }
 .strip button.on { border-color: var(--ink); background: #e3e5dc; box-shadow: inset 0 0 0 1px var(--ink); }
 .strip img, .strip .ph { width: 100%; background: #fff; border: 1px solid var(--rule-soft); }
+.strip .ph { aspect-ratio: 0.72; }
 .strip .mono { font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
 .dot { width: 6px; height: 6px; background: var(--signal-fill); display: inline-block; }
-.pagecol { min-width: 0; min-height: 0; overflow: auto; }
-.tool-hint { margin: 0 0 8px; }
-.page.editable { width: min(100%, calc((100vh - 250px) * var(--ar, 0.75))); margin: 0 auto; touch-action: none; }
+
+.pagecol { min-width: 0; min-height: 0; overflow: auto; padding: 18px 18px 60px; background: #d9dcd2; border: 1px solid var(--rule); }
+.pagewrap { display: flex; justify-content: center; margin-bottom: 18px; }
+.page.editable { position: relative; flex: none; background: #fff; box-shadow: 0 2px 12px rgb(27 31 36 / 0.25); container-type: inline-size; touch-action: none; user-select: none; }
+.page.editable > img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
+.pagewait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-2); }
 .page.editable.tool-select { cursor: default; }
 .page.editable:not(.tool-select) { cursor: crosshair; }
 .page.editable.tool-text, .page.editable.tool-note { cursor: text; }
-.overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.overlay .selbox { fill: rgb(212 71 43 / 0.08); stroke: var(--signal-fill); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-.overlay .hoverbox { fill: transparent; stroke: rgb(27 31 36 / 0.45); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
-.promptbox { position: absolute; z-index: 3; width: 230px; background: var(--panel); border: 1px solid var(--ink); padding: 8px 10px; box-shadow: 0 6px 18px rgb(27 31 36 / 0.28); line-height: 1.3; cursor: default; }
-.promptbox textarea { width: 100%; min-width: 0; }
-.pdfside { position: static; overflow-y: auto; min-height: 0; padding-right: 4px; }
-.pdfside section { margin-bottom: 14px; }
-.pdfside h2 { margin-bottom: 6px; }
+.vec { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.vec > * { pointer-events: auto; }
+.tool-select .vec [data-oid] { cursor: move; }
+.htmlobjs, .selayer { position: absolute; inset: 0; pointer-events: none; }
+.obj { position: absolute; pointer-events: auto; box-sizing: content-box; }
+.obj.text { cursor: default; }
+.tool-select .obj { cursor: move; }
+.tool-text .obj.text { cursor: text; }
+.obj.selected { outline: 1.5px solid var(--signal-fill); outline-offset: 3px; }
+.obj.text.editing { margin: 0; border: 0; background: transparent; resize: none; overflow: hidden; outline: 1.5px dashed var(--signal-fill); outline-offset: 3px; min-width: 2ch; box-sizing: content-box; font-family: inherit; }
+.obj.note { box-shadow: 0 1px 3px rgb(27 31 36 / 0.45); border: 1px solid rgb(27 31 36 / 0.4); background-image: linear-gradient(rgb(27 31 36 / 0.4), rgb(27 31 36 / 0.4)), linear-gradient(rgb(27 31 36 / 0.4), rgb(27 31 36 / 0.4)); background-size: 55% 1.5px, 55% 1.5px; background-position: 50% 38%, 50% 62%; background-repeat: no-repeat; box-sizing: border-box; }
+.obj.image { min-height: 24px; min-width: 24px; }
+.obj.image img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.selframe { position: absolute; outline: 1.5px solid var(--signal-fill); outline-offset: 0; pointer-events: none; }
+.ptwrap { position: absolute; width: 0; height: 0; }
+.hdl { position: absolute; width: 11px; height: 11px; background: #fff; border: 1.5px solid var(--signal-fill); box-sizing: border-box; pointer-events: auto; touch-action: none; z-index: 2; }
+.hdl-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.hdl-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.hdl-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.hdl-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.hdl-n { left: calc(50% - 5.5px); top: -6px; cursor: ns-resize; }
+.hdl-s { left: calc(50% - 5.5px); bottom: -6px; cursor: ns-resize; }
+.hdl-w { top: calc(50% - 5.5px); left: -6px; cursor: ew-resize; }
+.hdl-e { top: calc(50% - 5.5px); right: -6px; cursor: ew-resize; }
+.hdl-rot { left: calc(50% - 5.5px); top: -26px; border-radius: 50%; cursor: grab; }
+.obj.text .hdl-e, .obj.text .hdl-se { right: -9px; }
+.obj.text .hdl-se { bottom: -9px; }
+.hdl-p0, .hdl-p1 { left: -6px; top: -6px; border-radius: 50%; cursor: move; }
 .stamps { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
 .stamps button { padding: 3px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em; background: transparent; border: 1.5px solid; border-radius: 0; }
-.pagegroup { margin-bottom: 6px; }
-.pagehead { display: flex; justify-content: space-between; width: 100%; border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; padding: 3px 2px; font-weight: 600; font-size: 12px; text-align: left; background: transparent; }
-.pagehead.on { background: #e3e5dc; color: var(--ink); border-color: var(--rule); }
-.rowbtn { flex: 1; text-align: left; border: 0; padding: 2px 0; background: transparent; border-radius: 0; font-size: 12.5px; }
-.pdfside .editlist { margin-bottom: 4px; }
-
 /* ---- page tools ---- */
 .stamprow { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; max-width: 640px; }
 .stamprow select { min-width: 130px; }
 .stamprow input { flex: 1; min-width: 0; width: auto; }
 .stamprow input.narrow { flex: none; width: 70px; }
 code { font-family: var(--mono); font-size: 12px; background: #e3e5dc; padding: 0 4px; }
+
+/* ---- photo editor: placed objects and whole-photo sections ---- */
+.photo:not(.empty) { grid-template-rows: auto auto minmax(0, 1fr); }
+.photocanvas { display: block; width: min(100%, calc((100vh - 235px) * var(--ar, 1.5))); max-height: 100%; }
+.photocanvas > img { width: 100%; height: 100%; max-height: none; }
+.objlayer { position: absolute; inset: 0; container-type: inline-size; touch-action: none; user-select: none; }
+.objlayer.tool-select { cursor: default; }
+.objlayer:not(.tool-select) { cursor: crosshair; }
+.objlayer.tool-text { cursor: text; }
+.pobj { position: absolute; box-sizing: border-box; min-width: 14px; min-height: 14px; }
+.tool-select .pobj { cursor: move; }
+.tool-select .pobj:hover:not(.selected) { outline: 1.5px dashed rgb(255 255 255 / 0.95); box-shadow: 0 0 0 1px rgb(27 31 36 / 0.55); }
+.objlayer:not(.tool-select):not(.tool-text) .pobj { pointer-events: none; }
+.pobj.selected { outline: 1.5px solid var(--signal-fill); box-shadow: 0 0 0 1px #fff; }
+.ptext { position: absolute; margin: 0; padding: 0 0.1em; border: 0; resize: none; overflow: hidden; outline: 1.5px dashed var(--signal-fill); outline-offset: 4px; min-width: 2ch; white-space: pre; }
+.acc { border-bottom: 1px solid var(--rule-soft); }
+.acchead { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 4px; border: 0; border-radius: 0; text-align: left; background: transparent; }
+.acchead:hover:not(:disabled) { background: #e3e5dc; }
+.acctext { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.25; }
+.acctext b { font-size: 13px; }
+.acctext small { color: var(--ink-2); font-size: 11.5px; }
+.accchev { transition: transform 0.12s; color: var(--ink-2); }
+.acc.open .accchev { transform: rotate(180deg); }
+.acc.open > .acchead { border-bottom: 1px solid var(--rule-soft); }
+.accbody { padding: 12px 4px 14px; }
+.photoside { gap: 0; padding-right: 2px; }
+.photo .toolrail { max-height: 100%; }

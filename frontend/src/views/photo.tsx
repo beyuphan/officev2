@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
+  ChevronDown,
   Crop,
   Download,
   Droplet,
@@ -9,33 +10,21 @@ import {
   FlipHorizontal2,
   FlipVertical2,
   Frame,
-  Pencil,
+  ListChecks,
   Redo2,
   RotateCcw,
   RotateCw,
   SlidersHorizontal,
   Sparkles,
-  Type as TypeIcon,
   Undo2,
   type LucideIcon,
 } from "lucide-react";
 import { get, post, put as putSetting } from "../api";
-import { CheckField, FolderField, InputsField, RunBar, Segmented, SelectField, SourceField, TextField, baseName, formatBytes, imageFilter, useTask } from "../shared";
-import { AreaOutline, ColorInput, CropBox, DragLayer, Slider, usePhotoPreview } from "../photoui";
-import { ADJUST_KEYS, aspectRect, current, describe, pipeline, put, type Item, type Op } from "../lib/photoOps";
-import { normAspect, spanRect, type Rect } from "../lib/crop";
-
-type Tab = "crop" | "adjust" | "filters" | "blur" | "text" | "draw" | "frame" | "export";
-const TABS: { id: Tab; label: string; Icon: LucideIcon }[] = [
-  { id: "crop", label: "Crop", Icon: Crop },
-  { id: "adjust", label: "Adjust", Icon: SlidersHorizontal },
-  { id: "filters", label: "Filters", Icon: Sparkles },
-  { id: "blur", label: "Blur", Icon: Droplet },
-  { id: "text", label: "Text", Icon: TypeIcon },
-  { id: "draw", label: "Draw", Icon: Pencil },
-  { id: "frame", label: "Frame", Icon: Frame },
-  { id: "export", label: "Save", Icon: Download },
-];
+import { CheckField, FolderField, InputsField, RunBar, SelectField, TextField, baseName, formatBytes, imageFilter, useTask } from "../shared";
+import { ColorInput, CropBox, Slider, usePhotoPreview } from "../photoui";
+import { ALL_PTOOLS, ObjectLayer, PHOTO_GROUPS, PhotoBar, makeDefs, type Defs, type PTool } from "./photoobjects";
+import { ADJUST_KEYS, aspectRect, current, describe, isObject, ordered, pipeline, put, type Item, type Op } from "../lib/photoOps";
+import { normAspect, type Rect } from "../lib/crop";
 
 type Info = { width: number; height: number; format: string; megapixels: number; camera: string; taken: string; has_location: boolean; size_bytes: number };
 
@@ -229,19 +218,15 @@ function FiltersPanel(p: Panel) {
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Blur and privacy                                                                           */
+/* Blur the whole photo, or tilt-shift. (Blur over one area is a placed object, see the Blur tool.) */
 /* ------------------------------------------------------------------------------------------ */
 
 function BlurPanel(p: Panel) {
-  const [kind, setKind] = useState("gaussian");
-  const [shape, setShape] = useState<"rect" | "ellipse">("rect");
+  const [kind, setKind] = useState("tiltshift");
   const [radius, setRadius] = useState(Math.max(8, Math.round(p.info.width / 120)));
-  const [feather, setFeather] = useState(0);
-  const [invert, setInvert] = useState(false);
   const [angle, setAngle] = useState(0);
   const [band, setBand] = useState(0.18);
   const [center, setCenter] = useState(0.5);
-  const [area, setArea] = useState<Rect | null>(null);
   const tilt = kind === "tiltshift";
   const maxR = Math.max(60, Math.round(p.info.width / 20));
 
@@ -249,11 +234,9 @@ function BlurPanel(p: Panel) {
     const base: Op = { type: "blur", kind, radius };
     if (tilt) return { ...base, band, center };
     if (kind === "motion") base.angle = angle;
-    if (area && area.w > 0.01 && area.h > 0.01) return { ...base, area: { shape, ...area }, feather: shape === "ellipse" || feather ? feather : 0, invert };
     return base;
-  }, [kind, radius, band, center, angle, area, shape, feather, invert, tilt]);
+  }, [kind, radius, band, center, angle, tilt]);
 
-  // live preview of what "Apply" would do
   const { setDraft } = p;
   useEffect(() => {
     setDraft(op);
@@ -268,260 +251,43 @@ function BlurPanel(p: Panel) {
         value={kind}
         onChange={setKind}
         options={[
-          { id: "gaussian", label: "Blur (smooth)" },
-          { id: "box", label: "Blur (soft box)" },
-          { id: "motion", label: "Motion blur" },
-          { id: "pixelate", label: "Pixelate / mosaic" },
           { id: "tiltshift", label: "Tilt-shift (miniature)" },
+          { id: "gaussian", label: "Blur the whole photo" },
+          { id: "box", label: "Soft box blur" },
+          { id: "motion", label: "Motion blur" },
+          { id: "pixelate", label: "Pixelate the whole photo" },
         ]}
       />
       <Slider label={kind === "pixelate" ? "Block size" : "Strength"} value={radius} min={1} max={maxR} onChange={setRadius} reset={12} />
       {kind === "motion" && <Slider label="Direction" value={angle} min={-90} max={90} unit="°" onChange={setAngle} />}
-      {tilt ? (
+      {tilt && (
         <>
           <Slider label="Sharp band" value={band} min={0.03} max={0.6} step={0.01} onChange={setBand} reset={0.18} />
           <Slider label="Band position" value={center} min={0} max={1} step={0.01} onChange={setCenter} reset={0.5} />
         </>
-      ) : (
-        <>
-          <Segmented
-            label="Area"
-            value={shape}
-            onChange={setShape}
-            options={[
-              { id: "rect", label: "Rectangle" },
-              { id: "ellipse", label: "Oval" },
-            ]}
-          />
-          <Slider label="Soft edge" value={feather} min={0} max={Math.round(p.info.width / 40)} onChange={setFeather} />
-          <CheckField label="Blur everything except the area" checked={invert} onChange={setInvert} hint="Keeps the subject sharp and softens the background." />
-          <p className="hint">Drag on the photo to choose an area, for example a face or a number plate. Without an area the whole photo is affected.</p>
-        </>
       )}
       <div className="actions tight">
-        <button
-          className="primary"
-          onClick={() => {
-            p.commit(op);
-            setArea(null);
-          }}
-        >
+        <button className="primary" onClick={() => p.commit(op)}>
           Apply
         </button>
-        {area && <button onClick={() => setArea(null)}>Clear area</button>}
       </div>
-      {p.canvas &&
-        !tilt &&
-        createPortal(
-          <DragLayer onDrag={(a, b) => setArea(spanRect(a, b))} onEnd={(a, b) => setArea(spanRect(a, b))}>
-            {area && <AreaOutline rect={area} shape={shape} />}
-          </DragLayer>,
-          p.canvas,
-        )}
+      <p className="hint">To hide a face or a number plate, use the Blur area tool on the left and drag over it.</p>
     </>
   );
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Text                                                                                       */
-/* ------------------------------------------------------------------------------------------ */
-
-function TextPanel(p: Panel) {
-  const [text, setText] = useState("");
-  const [font, setFont] = useState("Arial");
-  const [size, setSize] = useState(Math.round(p.info.width * 0.07));
-  const [bold, setBold] = useState(true);
-  const [italic, setItalic] = useState(false);
-  const [color, setColor] = useState("#ffffff");
-  const [opacity, setOpacity] = useState(1);
-  const [outline, setOutline] = useState(Math.max(0, Math.round(p.info.width * 0.004)));
-  const [outlineColor, setOutlineColor] = useState("#000000");
-  const [shadow, setShadow] = useState(false);
-  const [box, setBox] = useState(false);
-  const [boxColor, setBoxColor] = useState("#000000");
-  const [rotation, setRotation] = useState(0);
-  const [pos, setPos] = useState({ x: 0.5, y: 0.5 });
-
-  const op = useMemo<Op>(
-    () => ({
-      type: "text", text, font, size, bold, italic, color, opacity, rotation, x: pos.x, y: pos.y,
-      stroke_width: outline, stroke_color: outlineColor, shadow, ...(box ? { background: boxColor } : {}),
-    }),
-    [text, font, size, bold, italic, color, opacity, rotation, pos, outline, outlineColor, shadow, box, boxColor],
-  );
-  const { setDraft } = p;
-  useEffect(() => {
-    setDraft(text.trim() ? op : null);
-    return () => setDraft(null);
-  }, [op, text, setDraft]);
-
-  return (
-    <>
-      <div className="field">
-        <label className="label" htmlFor="tx-text">
-          Text
-        </label>
-        <textarea id="tx-text" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Type, then click the photo to place it" />
-      </div>
-      <SelectField id="tx-font" label="Font" value={font} onChange={setFont} options={p.fonts.map((f) => ({ id: f, label: f }))} />
-      <Slider label="Size" value={size} min={8} max={Math.round(p.info.width / 2)} onChange={setSize} unit=" px" reset={Math.round(p.info.width * 0.07)} />
-      <div className="checks">
-        <CheckField label="Bold" checked={bold} onChange={setBold} />
-        <CheckField label="Italic" checked={italic} onChange={setItalic} />
-        <CheckField label="Shadow" checked={shadow} onChange={setShadow} />
-        <CheckField label="Label box" checked={box} onChange={setBox} />
-      </div>
-      <div className="colorrow">
-        <ColorInput label="Color" value={color} onChange={setColor} />
-        {box && <ColorInput label="Box" value={boxColor} onChange={setBoxColor} />}
-      </div>
-      <Slider label="Opacity" value={opacity} min={0.1} max={1} step={0.05} reset={1} onChange={setOpacity} />
-      <Slider label="Outline" value={outline} min={0} max={Math.max(6, Math.round(p.info.width / 100))} onChange={setOutline} unit=" px" />
-      {outline > 0 && <ColorInput label="Outline color" value={outlineColor} onChange={setOutlineColor} />}
-      <Slider label="Rotate" value={rotation} min={-180} max={180} unit="°" onChange={setRotation} />
-      <div className="actions tight">
-        <button
-          className="primary"
-          disabled={!text.trim()}
-          onClick={() => {
-            p.commit(op);
-            setText("");
-          }}
-        >
-          Add text
-        </button>
-      </div>
-      {p.canvas && createPortal(<DragLayer onClick={(pt) => setPos(pt)} onEnd={(a, b) => setPos({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })} />, p.canvas)}
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------------------------------ */
-/* Draw                                                                                       */
-/* ------------------------------------------------------------------------------------------ */
-
-type ShapeKind = "rect" | "ellipse" | "line" | "arrow" | "path" | "highlighter";
-
-function DrawPanel(p: Panel) {
-  const [kind, setKind] = useState<ShapeKind>("rect");
-  const [color, setColor] = useState("#ff3b30");
-  const [width, setWidth] = useState(Math.max(3, Math.round(p.info.width * 0.004)));
-  const [fill, setFill] = useState(false);
-  const [fillColor, setFillColor] = useState("#ff3b30");
-  const [ghost, setGhost] = useState<{ a: { x: number; y: number }; b: { x: number; y: number }; path: { x: number; y: number }[] } | null>(null);
-  const line = kind === "line" || kind === "arrow";
-  const freehand = kind === "path" || kind === "highlighter";
-
-  function build(a: { x: number; y: number }, b: { x: number; y: number }, path: { x: number; y: number }[]): Op {
-    const base = { type: "shape", kind, color: kind === "highlighter" && color === "#ff3b30" ? "#ffe600" : color, width: kind === "highlighter" ? width * 4 : width };
-    if (freehand) return { ...base, points: path.map((q) => [q.x, q.y]) };
-    if (line) return { ...base, points: [[a.x, a.y], [b.x, b.y]] };
-    const r = spanRect(a, b);
-    return { ...base, x: r.x, y: r.y, w: r.w, h: r.h, ...(fill ? { fill: fillColor } : {}) };
-  }
-
-  return (
-    <>
-      <Segmented
-        label="Tool"
-        value={kind}
-        onChange={setKind}
-        options={[
-          { id: "rect", label: "Box" },
-          { id: "ellipse", label: "Oval" },
-          { id: "line", label: "Line" },
-          { id: "arrow", label: "Arrow" },
-          { id: "path", label: "Pen" },
-          { id: "highlighter", label: "Marker" },
-        ]}
-      />
-      <div className="colorrow">
-        <ColorInput label="Color" value={color} onChange={setColor} />
-        {!line && !freehand && fill && <ColorInput label="Fill" value={fillColor} onChange={setFillColor} />}
-      </div>
-      <Slider label="Line width" value={width} min={1} max={Math.max(12, Math.round(p.info.width / 60))} unit=" px" onChange={setWidth} />
-      {!line && !freehand && <CheckField label="Fill the shape" checked={fill} onChange={setFill} />}
-      <p className="hint">Drag on the photo to draw. Each drawing is its own step in the list, so you can remove it later.</p>
-      {p.canvas &&
-        createPortal(
-          <DragLayer
-            onDrag={(a, b, path) => setGhost({ a, b, path })}
-            onEnd={(a, b, path) => {
-              setGhost(null);
-              p.commit(build(a, b, path));
-            }}
-          >
-            {ghost && (
-              <svg className="ghost" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden>
-                {freehand ? (
-                  <polyline points={ghost.path.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={color} strokeWidth="3" vectorEffect="non-scaling-stroke" />
-                ) : line ? (
-                  <line x1={ghost.a.x} y1={ghost.a.y} x2={ghost.b.x} y2={ghost.b.y} stroke={color} strokeWidth="3" vectorEffect="non-scaling-stroke" />
-                ) : (
-                  (() => {
-                    const r = spanRect(ghost.a, ghost.b);
-                    return kind === "ellipse" ? (
-                      <ellipse cx={r.x + r.w / 2} cy={r.y + r.h / 2} rx={r.w / 2} ry={r.h / 2} fill="none" stroke={color} strokeWidth="3" vectorEffect="non-scaling-stroke" />
-                    ) : (
-                      <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="none" stroke={color} strokeWidth="3" vectorEffect="non-scaling-stroke" />
-                    );
-                  })()
-                )}
-              </svg>
-            )}
-          </DragLayer>,
-          p.canvas,
-        )}
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------------------------------ */
-/* Frame: logo, border, rounded corners, background                                           */
+/* Frame: border, rounded corners, background                                                  */
 /* ------------------------------------------------------------------------------------------ */
 
 function FramePanel(p: Panel) {
-  const [logo, setLogo] = useState<string | null>(null);
-  const [pos, setPos] = useState({ x: 0.85, y: 0.88 });
-  const [w, setW] = useState(0.22);
-  const [opacity, setOpacity] = useState(1);
-  const [rotation, setRotation] = useState(0);
   const border = current<Op & { width: number; color: string }>(p.items, "border");
   const rounded = current<Op & { radius: number }>(p.items, "rounded");
   const [borderColor, setBorderColor] = useState("#ffffff");
   const bg = current<Op>(p.items, "remove_background");
 
-  const op = useMemo<Op | null>(() => (logo ? { type: "overlay", path: logo, x: pos.x, y: pos.y, w, opacity, rotation } : null), [logo, pos, w, opacity, rotation]);
-  const { setDraft } = p;
-  useEffect(() => {
-    setDraft(op);
-    return () => setDraft(null);
-  }, [op, setDraft]);
-
   return (
     <>
-      <span className="label">Logo or image</span>
-      <SourceField label="Image (PNG with transparency works best)" file={logo} onPick={setLogo} filters={imageFilter} />
-      {logo && (
-        <>
-          <Slider label="Size" value={w} min={0.03} max={1} step={0.01} reset={0.22} onChange={setW} />
-          <Slider label="Opacity" value={opacity} min={0.1} max={1} step={0.05} reset={1} onChange={setOpacity} />
-          <Slider label="Rotate" value={rotation} min={-180} max={180} unit="°" onChange={setRotation} />
-          <p className="hint">Click the photo to place it.</p>
-          <div className="actions tight">
-            <button
-              className="primary"
-              onClick={() => {
-                p.commit(op!);
-                setLogo(null);
-              }}
-            >
-              Add image
-            </button>
-          </div>
-        </>
-      )}
-      <hr />
       <Slider
         label="Border"
         value={border?.width ?? 0}
@@ -549,7 +315,6 @@ function FramePanel(p: Panel) {
         </button>
       </div>
       <p className="hint">Needs the small background model from Models. Save as PNG or WebP to keep transparency.</p>
-      {p.canvas && logo && createPortal(<DragLayer onClick={setPos} onEnd={(a, b) => setPos({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })} />, p.canvas)}
     </>
   );
 }
@@ -651,6 +416,17 @@ function SavePanel(p: Panel & { edits: Op[]; resultSize: [number, number] | null
 /* ------------------------------------------------------------------------------------------ */
 
 type Presets = Record<string, Op[]>;
+type SectionId = "crop" | "adjust" | "filters" | "blur" | "frame" | "save" | "edits";
+
+const SECTIONS: { id: SectionId; label: string; sub: string; Icon: LucideIcon }[] = [
+  { id: "crop", label: "Crop and rotate", sub: "Crop, straighten, rotate, flip", Icon: Crop },
+  { id: "adjust", label: "Light and color", sub: "Brightness, contrast, warmth…", Icon: SlidersHorizontal },
+  { id: "filters", label: "Filters and looks", sub: "Filters, vignette, film grain", Icon: Sparkles },
+  { id: "blur", label: "Blur the whole photo", sub: "Tilt-shift, motion blur", Icon: Droplet },
+  { id: "frame", label: "Border and background", sub: "Border, round corners, cut-out", Icon: Frame },
+  { id: "save", label: "Size and save", sub: "Resize, format, batch", Icon: Download },
+  { id: "edits", label: "All edits and presets", sub: "Remove a step, reuse a look", Icon: ListChecks },
+];
 
 export function PhotoEditor({ onDone }: { onDone: () => void }) {
   const [file, setFile] = useState<string | null>(null);
@@ -658,7 +434,10 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
   const [items, setItems] = useState<Item[]>([]);
   const [past, setPast] = useState<Item[][]>([]);
   const [future, setFuture] = useState<Item[][]>([]);
-  const [tab, setTab] = useState<Tab>("crop");
+  const [section, setSection] = useState<SectionId | null>("adjust");
+  const [tool, setTool] = useState<PTool>("select");
+  const [selected, setSelected] = useState<number | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
   const [compare, setCompare] = useState(false);
   const [draft, setDraft] = useState<Op | null>(null);
   const [canvas, setCanvas] = useState<HTMLDivElement | null>(null);
@@ -666,8 +445,15 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
   const [presets, setPresets] = useState<Presets>({});
   const [presetName, setPresetName] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [logo, setLogo] = useState<string | null>(null);
+  const [defs, setDefs] = useState<Defs>(() => makeDefs(3000));
   const idc = useRef(1);
-  const gesture = useRef(false);
+  const gestureOpen = useRef(false);
+  const gestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingBase = useRef<Item[] | null>(null);
+  const clip = useRef<Item | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const nextId = useCallback(() => idc.current++, []);
 
   useEffect(() => {
@@ -681,19 +467,33 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
     try {
       const i = await post<Info>("/photo/info", { input: picked });
       setInfo(i);
+      setDefs((d) => ({ ...makeDefs(i.width), font: d.font }));
       setFile(picked);
       setItems([]);
       setPast([]);
       setFuture([]);
+      setSelected(null);
+      setEditing(null);
+      setTool("select");
       setLoadError("");
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
   }
 
+  /* ---- history ---- */
   const record = () => {
-    setPast((p) => [...p.slice(-49), items]);
+    setPast((p) => [...p.slice(-59), itemsRef.current]);
     setFuture([]);
+  };
+  /** One undo step for a burst of changes (a drag, a slider). */
+  const touch = () => {
+    if (!gestureOpen.current) {
+      gestureOpen.current = true;
+      record();
+    }
+    clearTimeout(gestureTimer.current);
+    gestureTimer.current = setTimeout(() => (gestureOpen.current = false), 700);
   };
   const apply = useCallback((cur: Item[], op: Op) => (op._off ? cur.filter((i) => i.type !== op.type) : put(cur, op, nextId)), [nextId]);
   const commit = (op: Op) => {
@@ -702,48 +502,176 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
   };
   const live = (op: Op) => setItems((cur) => apply(cur, op));
   const begin = () => {
-    if (!gesture.current) {
-      gesture.current = true;
-      record();
-    }
+    gestureOpen.current = false;
+    touch();
+    clearTimeout(gestureTimer.current); // stays open until end()
   };
   const end = () => {
-    gesture.current = false;
+    gestureOpen.current = false;
   };
   const undo = useCallback(() => {
     if (!past.length) return;
     setFuture((f) => [...f, items]);
     setItems(past[past.length - 1]);
     setPast((p) => p.slice(0, -1));
+    setEditing(null);
   }, [past, items]);
   const redo = useCallback(() => {
     if (!future.length) return;
     setPast((p) => [...p, items]);
     setItems(future[future.length - 1]);
     setFuture((f) => f.slice(0, -1));
+    setEditing(null);
   }, [future, items]);
+
+  /* ---- placed objects ---- */
+  const patchItem = (id: number, change: Partial<Op>) =>
+    setItems((cur) =>
+      cur.map((i) => {
+        if (i.id !== id) return i;
+        const next = { ...i, ...change } as Item;
+        Object.keys(change).forEach((k) => change[k] === undefined && delete next[k]);
+        return next;
+      }),
+    );
+
+  function place(op: Op, opts: { edit?: boolean; keepTool?: boolean } = {}) {
+    let o = op;
+    if (o.type === "overlay" && !o.path) {
+      if (!logo) return;
+      o = { ...o, path: logo };
+    }
+    const item = { ...o, id: nextId() } as Item;
+    if (opts.edit) pendingBase.current = itemsRef.current;
+    else record();
+    setItems((cur) => [...cur, item]);
+    setSelected(item.id);
+    if (opts.edit) setEditing(item.id);
+    if (!opts.keepTool) {
+      setTool("select");
+    }
+    if (opts.keepTool) setSelected(null);
+  }
+
+  const commitText = (id: number) => {
+    setEditing((e) => (e === id ? null : e));
+    const it = itemsRef.current.find((x) => x.id === id);
+    if (!it) return;
+    if (it.type === "text" && !String(it.text ?? "").trim()) {
+      setItems((cur) => cur.filter((x) => x.id !== id));
+      setSelected((s) => (s === id ? null : s));
+      pendingBase.current = null;
+    } else if (pendingBase.current) {
+      const base = pendingBase.current;
+      pendingBase.current = null;
+      setPast((p) => [...p.slice(-59), base]);
+      setFuture([]);
+    }
+  };
+  const removeItem = (id: number) => {
+    record();
+    setItems((cur) => cur.filter((i) => i.id !== id));
+    setSelected((s) => (s === id ? null : s));
+    setEditing((s) => (s === id ? null : s));
+  };
+  const duplicate = (it: Item) => {
+    const { id: _id, ...rest } = it;
+    void _id;
+    const moved = { ...rest, ...nudge(it, 0.03, 0.03) } as Op;
+    record();
+    const item = { ...moved, id: nextId() } as Item;
+    setItems((cur) => [...cur, item]);
+    setSelected(item.id);
+    setTool("select");
+  };
+
+  async function pickLogo(replaceSelected: boolean): Promise<void> {
+    const picked = await open({ multiple: false, filters: imageFilter });
+    if (typeof picked !== "string") {
+      if (!logo) setTool("select");
+      return;
+    }
+    setLogo(picked);
+    if (replaceSelected && selected !== null) {
+      touch();
+      patchItem(selected, { path: picked });
+    }
+  }
+
+  function pickTool(t: PTool) {
+    if (editing !== null) commitText(editing);
+    setTool(t);
+    setSelected(null);
+    setEditing(null);
+    if (section === "crop") setSection(null);
+    if (t === "image") void pickLogo(false);
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t.closest("input, textarea, select")) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      if ((e.target as HTMLElement).closest("input, textarea, select")) return;
+      const k = e.key.toLowerCase();
+      const mod = e.ctrlKey || e.metaKey;
+      const sel = itemsRef.current.find((i) => i.id === selected);
+      if (mod && k === "z") {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      } else if (mod && k === "y") {
         e.preventDefault();
         redo();
+      } else if (mod && k === "d" && sel) {
+        e.preventDefault();
+        duplicate(sel);
+      } else if (mod && k === "c" && sel) {
+        clip.current = sel;
+      } else if (mod && k === "v" && clip.current) {
+        e.preventDefault();
+        duplicate(clip.current);
+      } else if ((k === "delete" || k === "backspace") && sel) {
+        e.preventDefault();
+        removeItem(sel.id);
+      } else if (k === "enter" && sel?.type === "text") {
+        e.preventDefault();
+        setEditing(sel.id);
+      } else if (k === "escape") {
+        setSelected(null);
+        setTool("select");
+      } else if (sel && k.startsWith("arrow")) {
+        e.preventDefault();
+        const s = e.shiftKey ? 0.02 : 0.002;
+        const d = { arrowleft: [-s, 0], arrowright: [s, 0], arrowup: [0, -s], arrowdown: [0, s] }[k]!;
+        touch();
+        patchItem(sel.id, nudge(sel, d[0], d[1]));
+      } else if (!mod && !e.altKey && section !== "crop") {
+        const t = ALL_PTOOLS.find((x) => x.key && x.key.toLowerCase() === k);
+        if (t) pickTool(t.id);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undo, redo, selected, editing, section, logo]);
 
-  const edits = useMemo(() => pipeline(draft ? [...items, { ...draft, id: -1 }] : items), [items, draft]);
+  /* ---- what the engine draws ---- */
+  const shownItems = useMemo(() => ordered(editing !== null ? items.filter((i) => i.id !== editing) : items), [items, editing]);
+  const sent = useMemo(() => (draft ? [...shownItems, { ...draft, id: -1 } as Item] : shownItems), [shownItems, draft]);
+  const edits = useMemo(() => sent.map(({ id: _id, ...op }) => (void _id, op as Op)), [sent]);
   const saved = useMemo(() => pipeline(items), [items]);
-  const pv = usePhotoPreview(file, compare ? [] : edits);
-  const size = pv.data ? { w: pv.data.width, h: pv.data.height } : null;
+  const ids = useMemo(() => sent.map((i) => i.id), [sent]);
+  const pv = usePhotoPreview(file, compare ? [] : edits, 80, ids);
+  const shown = pv.data;
+  const size = shown ? { w: shown.width, h: shown.height } : null;
+  const sizes = useMemo(() => {
+    const m = new Map<number, { w: number; h: number }>();
+    if (!shown?.boxes || compare) return m;
+    shown.boxes.forEach((b) => {
+      const id = pv.tag?.[b.index];
+      if (id !== undefined && id >= 0) m.set(id, { w: b.rect[2] - b.rect[0], h: b.rect[3] - b.rect[1] });
+    });
+    return m;
+  }, [shown, pv.tag, compare]);
+  const basis = { w: shown?.result_size[0] ?? info?.width ?? 1000, h: shown?.result_size[1] ?? info?.height ?? 1000 };
 
   async function savePreset() {
     const name = presetName.trim();
@@ -768,7 +696,7 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
     return (
       <div className="photo empty">
         <h1>Photo editor</h1>
-        <p className="muted">Crop, straighten, adjust light and color, add filters, blur faces or number plates, add text and drawings, then save a copy. Your original is never changed.</p>
+        <p className="muted">Crop, straighten, adjust light and color, add filters, blur faces or number plates, add text and drawings, then save a copy. Click anything you placed to change it. Your original is never changed.</p>
         <div className="actions">
           <button className="primary" onClick={choose}>
             Open a photo…
@@ -780,12 +708,21 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
   }
 
   const panel: Panel = { file, info, items, canvas, size, commit, live, begin, end, setDraft, fonts: fonts.fonts, filters: fonts.filters };
-  const shown = pv.data;
+  const sel = items.find((i) => i.id === selected) ?? null;
+  const objectsOn = section !== "crop" && !compare;
+  const active = ALL_PTOOLS.find((t) => t.id === tool)!;
+  const toggle = (id: SectionId) => {
+    setSection((s) => (s === id ? null : id));
+    if (id === "crop") {
+      setSelected(null);
+      setEditing(null);
+      setTool("select");
+    }
+  };
 
   return (
     <div className="photo">
       <div className="phototop">
-        <button onClick={choose}>Open another…</button>
         <span className="chip" title={file}>
           <b>{baseName(file)}</b>
           <span className="mono note">
@@ -795,97 +732,164 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
           </span>
         </span>
         <span className="spacer" />
-        <button className="icon" aria-label="Undo" disabled={!past.length} onClick={undo}>
+        <button className="icon" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!past.length} onClick={undo}>
           <Undo2 size={16} strokeWidth={1.5} />
         </button>
-        <button className="icon" aria-label="Redo" disabled={!future.length} onClick={redo}>
+        <button className="icon" aria-label="Redo" title="Redo (Ctrl+Y)" disabled={!future.length} onClick={redo}>
           <Redo2 size={16} strokeWidth={1.5} />
         </button>
-        <button
-          className={compare ? "on" : ""}
-          aria-pressed={compare}
-          onPointerDown={() => setCompare(true)}
-          onPointerUp={() => setCompare(false)}
-          onPointerLeave={() => setCompare(false)}
-        >
+        <button className={compare ? "on" : ""} aria-pressed={compare} onPointerDown={() => setCompare(true)} onPointerUp={() => setCompare(false)} onPointerLeave={() => setCompare(false)}>
           <Eye size={15} strokeWidth={1.5} /> Hold to compare
+        </button>
+        <button onClick={choose}>Open another…</button>
+        <button className="primary" onClick={() => setSection("save")}>
+          Save…
         </button>
       </div>
 
+      <PhotoBar
+        tool={tool}
+        hint={section === "crop" ? "Drag the frame on the photo, then press Apply crop." : active.hint}
+        sel={objectsOn ? sel : null}
+        defs={defs}
+        setDefs={setDefs}
+        fonts={fonts.fonts}
+        maxSide={Math.max(info.width, info.height)}
+        hasImage={Boolean(logo)}
+        patch={patchItem}
+        touch={touch}
+        onDelete={() => sel && removeItem(sel.id)}
+        onDuplicate={() => sel && duplicate(sel)}
+        onPickImage={() => pickLogo(true)}
+      />
+
       <div className="photomain">
+        <nav className="toolrail" aria-label="Photo tools">
+          {PHOTO_GROUPS.map((g) => (
+            <div key={g.title || "select"} className="toolgroup" role="group" aria-label={g.title || "Select"}>
+              {g.title && <span className="grouptitle">{g.title}</span>}
+              {g.tools.map(({ id, label, Icon, key }) => (
+                <button key={id} className={tool === id && section !== "crop" ? "on" : ""} aria-pressed={tool === id} aria-label={label} title={key ? `${label} (${key})` : label} onClick={() => pickTool(id)}>
+                  <Icon size={17} strokeWidth={1.5} aria-hidden />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
         <div className="photostage">
-          <div className="photocanvas" ref={setCanvas}>
+          <div className="photocanvas" ref={setCanvas} style={shown ? ({ aspectRatio: `${shown.width} / ${shown.height}`, ["--ar" as string]: shown.width / shown.height } as React.CSSProperties) : undefined}>
             {shown ? <img src={`data:${shown.mime};base64,${shown.image}`} alt="Photo preview" draggable={false} className={pv.loading ? "loading" : ""} /> : <p className="muted pad">Loading…</p>}
+            {objectsOn && shown && (
+              <ObjectLayer
+                items={items}
+                itemsRef={itemsRef}
+                selected={selected}
+                editing={editing}
+                tool={tool}
+                sizes={sizes}
+                basis={basis}
+                defs={defs}
+                hasImage={Boolean(logo)}
+                onSelect={setSelected}
+                onEdit={setEditing}
+                patch={patchItem}
+                touch={touch}
+                place={place}
+                onText={(id, text) => {
+                  touch();
+                  patchItem(id, { text });
+                }}
+                onCommit={commitText}
+              />
+            )}
           </div>
           {pv.error && <p className="msg bad stage-error">{pv.error}</p>}
         </div>
 
-        <aside className="photoside">
-          <div className="phototabs" role="tablist" aria-label="Photo tools">
-            {TABS.map(({ id, label, Icon }) => (
-              <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>
-                <Icon size={15} strokeWidth={1.5} aria-hidden />
-                {label}
+        <aside className="photoside" aria-label="Whole-photo tools">
+          {SECTIONS.map(({ id, label, sub, Icon }) => (
+            <section key={id} className={`acc${section === id ? " open" : ""}`}>
+              <button className="acchead" aria-expanded={section === id} onClick={() => toggle(id)}>
+                <Icon size={16} strokeWidth={1.5} aria-hidden />
+                <span className="acctext">
+                  <b>{label}</b>
+                  <small>{sub}</small>
+                </span>
+                <ChevronDown size={15} strokeWidth={1.5} aria-hidden className="accchev" />
               </button>
-            ))}
-          </div>
-          <div className="tabpanel" key={tab}>
-            {tab === "crop" && <CropPanel {...panel} />}
-            {tab === "adjust" && <AdjustPanel {...panel} />}
-            {tab === "filters" && <FiltersPanel {...panel} />}
-            {tab === "blur" && <BlurPanel {...panel} />}
-            {tab === "text" && <TextPanel {...panel} />}
-            {tab === "draw" && <DrawPanel {...panel} />}
-            {tab === "frame" && <FramePanel {...panel} />}
-            {tab === "export" && <SavePanel {...panel} edits={saved} resultSize={shown?.result_size ?? null} onDone={onDone} />}
-          </div>
-
-          <div className="changes">
-            <h2>Edits ({items.length})</h2>
-            {items.length === 0 ? (
-              <p className="muted">Nothing changed yet.</p>
-            ) : (
-              <ol className="editlist">
-                {items.map((it) => (
-                  <li key={it.id}>
-                    <span>{describe(it)}</span>
-                    <button className="icon text" aria-label={`Remove: ${describe(it)}`} onClick={() => { record(); setItems((cur) => cur.filter((i) => i.id !== it.id)); }}>
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            )}
-            <div className="actions tight">
-              <button disabled={!items.length} onClick={() => { record(); setItems([]); }}>
-                Reset all
-              </button>
-            </div>
-            <h2>Presets</h2>
-            <p className="hint">Save the current edits to reuse them on other photos.</p>
-            <div className="inline">
-              <input aria-label="Preset name" placeholder="Name" value={presetName} onChange={(e) => setPresetName(e.target.value)} />
-              <button disabled={!presetName.trim() || !saved.length} onClick={savePreset}>
-                Save
-              </button>
-            </div>
-            <ul className="presetlist">
-              {Object.entries(presets).map(([name, ops]) => (
-                <li key={name}>
-                  <span>{name}</span>
-                  <button className="icon text" onClick={() => usePreset(ops)}>
-                    Apply
-                  </button>
-                  <button className="icon text" onClick={() => removePreset(name)}>
-                    Delete
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+              {section === id && (
+                <div className="accbody">
+                  {id === "crop" && <CropPanel {...panel} />}
+                  {id === "adjust" && <AdjustPanel {...panel} />}
+                  {id === "filters" && <FiltersPanel {...panel} />}
+                  {id === "blur" && <BlurPanel {...panel} />}
+                  {id === "frame" && <FramePanel {...panel} />}
+                  {id === "save" && <SavePanel {...panel} edits={saved} resultSize={shown?.result_size ?? null} onDone={onDone} />}
+                  {id === "edits" && (
+                    <>
+                      <h2>Edits ({items.length})</h2>
+                      {items.length === 0 ? (
+                        <p className="muted">Nothing changed yet.</p>
+                      ) : (
+                        <ol className="editlist">
+                          {items.map((it) => (
+                            <li key={it.id} className={it.id === selected ? "sel" : ""}>
+                              <button className="rowbtn" onClick={() => isObject(it) && (setSelected(it.id), setTool("select"))}>
+                                {describe(it)}
+                              </button>
+                              <button className="icon text" aria-label={`Remove: ${describe(it)}`} onClick={() => removeItem(it.id)}>
+                                Remove
+                              </button>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      <div className="actions tight">
+                        <button disabled={!items.length} onClick={() => { record(); setItems([]); setSelected(null); }}>
+                          Reset all
+                        </button>
+                      </div>
+                      <h2>Presets</h2>
+                      <p className="hint">Save the current edits to reuse them on other photos.</p>
+                      <div className="inline">
+                        <input aria-label="Preset name" placeholder="Name" value={presetName} onChange={(e) => setPresetName(e.target.value)} />
+                        <button disabled={!presetName.trim() || !saved.length} onClick={savePreset}>
+                          Save
+                        </button>
+                      </div>
+                      <ul className="presetlist">
+                        {Object.entries(presets).map(([name, ops]) => (
+                          <li key={name}>
+                            <span>{name}</span>
+                            <button className="icon text" onClick={() => usePreset(ops)}>
+                              Apply
+                            </button>
+                            <button className="icon text" onClick={() => removePreset(name)}>
+                              Delete
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
+            </section>
+          ))}
         </aside>
       </div>
     </div>
   );
 }
 
+/** The same object moved by a fraction of the picture. */
+function nudge(it: Item, dx: number, dy: number): Partial<Op> {
+  if (it.type === "blur" && it.area) {
+    const a = it.area as { x: number; y: number };
+    return { area: { ...(it.area as object), x: a.x + dx, y: a.y + dy } };
+  }
+  if (it.type === "shape" && Array.isArray(it.points)) return { points: (it.points as number[][]).map(([x, y]) => [x + dx, y + dy]) };
+  return { x: Number(it.x ?? 0) + dx, y: Number(it.y ?? 0) + dy };
+}

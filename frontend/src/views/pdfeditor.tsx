@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   Circle,
+  Copy,
   Eraser,
   EyeOff,
   Highlighter,
@@ -13,40 +14,65 @@ import {
   PenLine,
   Redo2,
   Square,
+  Stamp,
   StickyNote,
   Strikethrough,
+  Trash2,
   Type as TypeIcon,
   Underline,
   Undo2,
+  ZoomIn,
+  ZoomOut,
   type LucideIcon,
 } from "lucide-react";
-import { CheckField, RunBar, SelectField, SourceField, baseName, imageFilter, pdfFilter, useTask } from "../shared";
-import { PageNav, thumbSrc, useRendered, useThumbs, type PageData } from "../pdfview";
-import { ColorInput, Slider } from "../photoui";
-import { describe, groupByPage, hitTest, normalizeRect, pagesWithEdits, simplify, translate, type PdfItem, type PdfOp, type Pt } from "../lib/pdfOps";
-import { get } from "../api";
+import { Message, baseName, imageFilter, pdfFilter, useTask, ProgressBar } from "../shared";
+import { thumbSrc, useThumbs, type PageData } from "../pdfview";
+import { describe, normalizeRect, pagesWithEdits, simplify, translate, type PdfItem, type PdfOp, type Pt } from "../lib/pdfOps";
+import { get, post } from "../api";
+import { HtmlItem, SVG_TYPES, VectorFrame, VectorItem, num, type HandleId } from "./pdfitems";
 
-type Tool = "select" | "text" | "image" | "highlight" | "underline" | "strike" | "rect" | "ellipse" | "line" | "arrow" | "pen" | "note" | "link" | "erase" | "redact";
+type Tool = "select" | "text" | "stamp" | "image" | "note" | "link" | "highlight" | "underline" | "strike" | "rect" | "ellipse" | "line" | "arrow" | "pen" | "erase" | "redact";
 
-const TOOLS: { id: Tool; label: string; Icon: LucideIcon; hint: string }[] = [
-  { id: "select", label: "Select", Icon: MousePointer2, hint: "Click an edit to select it, drag to move it, press Delete to remove it." },
-  { id: "text", label: "Text", Icon: TypeIcon, hint: "Click where the text should start, or drag a box to wrap it." },
-  { id: "image", label: "Image", Icon: ImagePlus, hint: "Choose a picture (a logo or a signature), then click or drag on the page." },
-  { id: "highlight", label: "Highlight", Icon: Highlighter, hint: "Drag over the words to highlight." },
-  { id: "underline", label: "Underline", Icon: Underline, hint: "Drag over the words to underline." },
-  { id: "strike", label: "Strike", Icon: Strikethrough, hint: "Drag over the words to strike through." },
-  { id: "rect", label: "Box", Icon: Square, hint: "Drag to draw a rectangle." },
-  { id: "ellipse", label: "Oval", Icon: Circle, hint: "Drag to draw an oval." },
-  { id: "line", label: "Line", Icon: Minus, hint: "Drag to draw a line." },
-  { id: "arrow", label: "Arrow", Icon: MoveUpRight, hint: "Drag to draw an arrow." },
-  { id: "pen", label: "Pen", Icon: PenLine, hint: "Draw freehand, for example a signature." },
-  { id: "note", label: "Note", Icon: StickyNote, hint: "Click to leave a comment note." },
-  { id: "link", label: "Link", Icon: Link2, hint: "Drag over an area, then enter a web address or a page number." },
-  { id: "erase", label: "Erase", Icon: Eraser, hint: "Drag over content to remove it and leave white." },
-  { id: "redact", label: "Redact", Icon: EyeOff, hint: "Drag over content to remove it permanently under a black box." },
+const GROUPS: { title: string; tools: { id: Tool; label: string; Icon: LucideIcon; key: string; hint: string }[] }[] = [
+  { title: "", tools: [{ id: "select", label: "Select", Icon: MousePointer2, key: "V", hint: "Click anything on the page to edit it. Drag to move, double-click text to retype." }] },
+  {
+    title: "Add",
+    tools: [
+      { id: "text", label: "Text", Icon: TypeIcon, key: "T", hint: "Click on the page and type. Drag a box first to make the text wrap." },
+      { id: "stamp", label: "Stamp", Icon: Stamp, key: "", hint: "Pick a stamp, then click where it goes." },
+      { id: "image", label: "Image", Icon: ImagePlus, key: "I", hint: "Click where the picture goes, or drag a box. Works for logos and signatures." },
+      { id: "note", label: "Note", Icon: StickyNote, key: "N", hint: "Click to leave a comment, then type it above." },
+      { id: "link", label: "Link", Icon: Link2, key: "L", hint: "Drag over an area, then type a web address or a page number above." },
+    ],
+  },
+  {
+    title: "Mark up",
+    tools: [
+      { id: "highlight", label: "Highlight", Icon: Highlighter, key: "H", hint: "Drag over the words to highlight them." },
+      { id: "underline", label: "Underline", Icon: Underline, key: "U", hint: "Drag over the words to underline them." },
+      { id: "strike", label: "Strike", Icon: Strikethrough, key: "S", hint: "Drag over the words to strike them through." },
+    ],
+  },
+  {
+    title: "Draw",
+    tools: [
+      { id: "rect", label: "Box", Icon: Square, key: "R", hint: "Drag to draw a rectangle." },
+      { id: "ellipse", label: "Oval", Icon: Circle, key: "O", hint: "Drag to draw an oval." },
+      { id: "line", label: "Line", Icon: Minus, key: "", hint: "Drag to draw a line." },
+      { id: "arrow", label: "Arrow", Icon: MoveUpRight, key: "A", hint: "Drag to draw an arrow." },
+      { id: "pen", label: "Pen", Icon: PenLine, key: "P", hint: "Draw freehand, for example a signature." },
+    ],
+  },
+  {
+    title: "Remove",
+    tools: [
+      { id: "erase", label: "Erase", Icon: Eraser, key: "E", hint: "Drag over content to take it out and leave white." },
+      { id: "redact", label: "Redact", Icon: EyeOff, key: "X", hint: "Drag over content to remove it for good under a black box." },
+    ],
+  },
 ];
-
-const DEFAULT_COLOR: Partial<Record<Tool, string>> = { highlight: "#ffe600", underline: "#1a7f37", strike: "#d4472b", text: "#111111", note: "#ffcc00", rect: "#d4472b", ellipse: "#d4472b", line: "#d4472b", arrow: "#d4472b", pen: "#1b1f24" };
+const ALL_TOOLS = GROUPS.flatMap((g) => g.tools);
+const STICKY: Tool[] = ["highlight", "underline", "strike", "pen", "erase", "redact"]; // stay active so several can be made in a row
 
 const STAMPS = [
   { text: "APPROVED", color: "#1a7f37" },
@@ -56,123 +82,484 @@ const STAMPS = [
   { text: "REVIEWED", color: "#1d4ed8" },
 ];
 
-type Prompt = { kind: "text" | "note" | "link"; at: Pt; box?: { x0: number; y0: number; x1: number; y1: number } };
-type Drag =
-  | { kind: "draw"; a: Pt; b: Pt; path: Pt[]; moved: boolean }
-  | { kind: "move"; id: number; last: Pt; moved: boolean };
+const TOOL_COLOR: Partial<Record<Tool, string>> = { highlight: "#ffe600", underline: "#1a7f37", strike: "#d4472b", text: "#111111", note: "#ffcc00", rect: "#d4472b", ellipse: "#d4472b", line: "#d4472b", arrow: "#d4472b", pen: "#1b1f24" };
+
+type Defaults = { color: string; width: number; fill: boolean; fillColor: string; opacity: number; font: string; size: number; bold: boolean; italic: boolean };
+const DEFAULTS: Defaults = { color: "#d4472b", width: 2, fill: false, fillColor: "#fff3a3", opacity: 1, font: "Arial", size: 14, bold: false, italic: false };
+
+type Ghost = { page: number; tool: Tool; a: Pt; b: Pt; path: Pt[]; moved: boolean };
+type Size = { pw: number; ph: number };
+const FIRST_SIZE: Size = { pw: 595, ph: 842 };
+
+const strip = (ops: PdfItem[]): PdfOp[] => ops.map(({ id: _id, ...o }) => (void _id, o));
+const isEmptyItem = (o: PdfItem) => (o.type === "text" || o.type === "note") && !String(o.text ?? "").trim() || (o.type === "link" && !o.uri && !o.target_page);
 
 export function PdfEditor({ onDone }: { onDone: () => void }) {
   const [file, setFile] = useState<string | null>(null);
   const [ops, setOps] = useState<PdfItem[]>([]);
   const [past, setPast] = useState<PdfItem[][]>([]);
   const [future, setFuture] = useState<PdfItem[][]>([]);
-  const [page, setPage] = useState(1);
   const [tool, setTool] = useState<Tool>("select");
   const [selected, setSelected] = useState<number | null>(null);
-  const [prompt, setPrompt] = useState<Prompt | null>(null);
-  const [ghost, setGhost] = useState<Drag | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [ghost, setGhost] = useState<Ghost | null>(null);
+  const [defs, setDefs] = useState<Defaults>(DEFAULTS);
+  const [image, setImage] = useState<string | null>(null);
+  const [stamp, setStamp] = useState(STAMPS[0]);
+  const [fonts, setFonts] = useState<string[]>(["Arial"]);
   const [flatten, setFlatten] = useState(false);
   const [message, setMessage] = useState("");
-  const idc = useRef(1);
-  const gesture = useRef(false);
+  const [focusTick, setFocusTick] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [current, setCurrent] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [first, setFirst] = useState<Size>(FIRST_SIZE);
+  const [pages, setPages] = useState<Map<number, PageData>>(new Map());
+  const [fitW, setFitW] = useState(760);
 
-  // tool options
-  const [color, setColor] = useState("#d4472b");
-  const [width, setWidth] = useState(2);
-  const [fill, setFill] = useState(false);
-  const [fillColor, setFillColor] = useState("#fff3a3");
-  const [opacity, setOpacity] = useState(1);
-  const [font, setFont] = useState("Arial");
-  const [size, setSize] = useState(14);
-  const [bold, setBold] = useState(false);
-  const [italic, setItalic] = useState(false);
-  const [image, setImage] = useState<string | null>(null);
-  const [stamp, setStamp] = useState<(typeof STAMPS)[number] | null>(null);
-  const [fonts, setFonts] = useState<string[]>(["Arial"]);
+  const idc = useRef(1);
+  const pageEls = useRef(new Map<number, HTMLDivElement>());
+  const col = useRef<HTMLDivElement>(null);
+  const opsRef = useRef(ops);
+  opsRef.current = ops;
+  const clip = useRef<PdfItem | null>(null);
+  const gestureOpen = useRef(false);
+  const gestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingBase = useRef<PdfItem[] | null>(null);
+  const loading = useRef(new Set<number>());
 
   const task = useTask(onDone);
-  const { thumbs, total } = useThumbs(file, 96);
-  const wrap = useRef<HTMLDivElement>(null);
+  const { thumbs } = useThumbs(file, 96);
 
   useEffect(() => {
     get<{ fonts: string[] }>("/photo/fonts").then((r) => setFonts(r.fonts)).catch(() => undefined);
   }, []);
 
-  const body = useMemo(
-    () => (file ? { input: file, page, width: 1000, ops: ops.map(({ id: _id, ...o }) => (void _id, o)) } : null),
-    [file, page, ops],
-  );
-  const { data: fresh, loading, error } = useRendered("/pdf/edit/preview", body, 150);
-  const lastData = useRef<PageData | null>(null);
-  if (fresh) lastData.current = fresh;
-  const data = fresh ?? lastData.current;
-  const boxes = data?.boxes ?? [];
+  /* ---- document and pages ---- */
+  useEffect(() => {
+    if (!file) return;
+    let alive = true;
+    post<{ pages: number; width: number; height: number }>("/pdf/info", { input: file })
+      .then((r) => {
+        if (!alive) return;
+        setTotal(r.pages);
+        if (r.width) setFirst({ pw: r.width, ph: r.height });
+      })
+      .catch((e) => alive && setMessage(e instanceof Error ? e.message : String(e)));
+    return () => {
+      alive = false;
+    };
+  }, [file]);
 
-  const changedPages = useMemo(() => pagesWithEdits(ops), [ops]);
-  const sel = ops.find((o) => o.id === selected) ?? null;
+  const loadPage = useCallback(
+    (n: number) => {
+      if (!file || loading.current.has(n)) return;
+      loading.current.add(n);
+      post<PageData>("/pdf/render", { input: file, page: n, width: 1400 })
+        .then((d) => setPages((m) => new Map(m).set(n, d)))
+        .catch((e) => setMessage(e instanceof Error ? e.message : String(e)));
+    },
+    [file],
+  );
+
+  useEffect(() => {
+    const el = col.current;
+    if (!el) return;
+    const fit = () => setFitW(Math.max(360, Math.min(900, el.clientWidth - 56)));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [file]);
+
+  const sizeOf = useCallback((n: number): Size => {
+    const d = pages.get(n);
+    return d ? { pw: d.page_width, ph: d.page_height } : first;
+  }, [pages, first]);
+
+  function scrollToPage(n: number) {
+    setCurrent(n);
+    pageEls.current.get(n)?.scrollIntoView({ block: "start" });
+  }
+  function onScroll() {
+    const c = col.current;
+    if (!c) return;
+    const mid = c.getBoundingClientRect().top + c.clientHeight * 0.35;
+    let best = 1;
+    pageEls.current.forEach((el, n) => {
+      if (el.getBoundingClientRect().top <= mid) best = Math.max(best, n);
+    });
+    setCurrent(best);
+  }
 
   /* ---- history ---- */
   const record = () => {
-    setPast((p) => [...p.slice(-49), ops]);
+    setPast((p) => [...p.slice(-59), opsRef.current]);
     setFuture([]);
   };
-  const add = (op: PdfOp) => {
-    record();
-    const item: PdfItem = { ...op, id: idc.current++ };
-    setOps((cur) => [...cur, item]);
-    setSelected(item.id);
-  };
-  const remove = (id: number) => {
-    record();
-    setOps((cur) => cur.filter((o) => o.id !== id));
-    setSelected((s) => (s === id ? null : s));
-  };
-  const begin = () => {
-    if (!gesture.current) {
-      gesture.current = true;
+  /** One undo step for a burst of changes (a drag, typing in a field). */
+  const touch = () => {
+    if (!gestureOpen.current) {
+      gestureOpen.current = true;
       record();
     }
+    clearTimeout(gestureTimer.current);
+    gestureTimer.current = setTimeout(() => (gestureOpen.current = false), 700);
   };
-  const end = () => {
-    gesture.current = false;
-  };
-  const patch = (id: number, change: Partial<PdfOp>) => setOps((cur) => cur.map((o) => (o.id === id ? { ...o, ...change } : o)));
   const undo = useCallback(() => {
-    if (!past.length) return;
+    const p = past;
+    if (!p.length) return;
     setFuture((f) => [...f, ops]);
-    setOps(past[past.length - 1]);
-    setPast((p) => p.slice(0, -1));
+    setOps(p[p.length - 1]);
+    setPast(p.slice(0, -1));
+    setEditing(null);
   }, [past, ops]);
   const redo = useCallback(() => {
     if (!future.length) return;
     setPast((p) => [...p, ops]);
     setOps(future[future.length - 1]);
     setFuture((f) => f.slice(0, -1));
+    setEditing(null);
   }, [future, ops]);
 
+  const patch = (id: number, change: Partial<PdfOp>) => setOps((cur) => cur.map((o) => (o.id === id ? { ...o, ...change } : o)));
+  function add(op: PdfOp, opts: { quiet?: boolean } = {}): PdfItem {
+    const item: PdfItem = { ...op, id: idc.current++ };
+    if (opts.quiet) pendingBase.current = opsRef.current;
+    else record();
+    setOps((cur) => [...cur, item]);
+    return item;
+  }
+  function remove(id: number) {
+    record();
+    setOps((cur) => cur.filter((o) => o.id !== id));
+    setSelected((s) => (s === id ? null : s));
+    setEditing((s) => (s === id ? null : s));
+  }
+  function duplicate(op: PdfItem, offset = 14) {
+    const { id: _id, ...rest } = op;
+    void _id;
+    const moved = translate(rest as PdfOp, offset, offset);
+    const item = add(moved);
+    setSelected(item.id);
+    setTool("select");
+  }
+
+  /* ---- editing text in place ---- */
+  const commitText = (id: number) => {
+    setEditing((e) => (e === id ? null : e));
+    const o = opsRef.current.find((x) => x.id === id);
+    if (!o) return;
+    if (o.type === "text" && !String(o.text ?? "").trim()) {
+      setOps((cur) => cur.filter((x) => x.id !== id));
+      setSelected((s) => (s === id ? null : s));
+      pendingBase.current = null;
+    } else if (pendingBase.current) {
+      const base = pendingBase.current;
+      pendingBase.current = null;
+      setPast((p) => [...p.slice(-59), base]);
+      setFuture([]);
+    }
+  };
+  const startEdit = (id: number) => {
+    setSelected(id);
+    setEditing(id);
+    touch();
+  };
+
+  /* ---- tools ---- */
+  function pickTool(t: Tool) {
+    commitIfEmpty();
+    setTool(t);
+    setSelected(null);
+    setEditing(null);
+    setMessage("");
+    if (TOOL_COLOR[t]) setDefs((d) => ({ ...d, color: TOOL_COLOR[t]!, opacity: t === "highlight" ? 0.5 : ["underline", "strike"].includes(t) ? 1 : d.opacity }));
+    if (t === "image") void chooseImage(true);
+  }
+  function commitIfEmpty() {
+    const open = opsRef.current.find((o) => o.id === editing);
+    if (open) commitText(open.id);
+  }
+  async function chooseImage(thenPlace: boolean) {
+    const picked = await open({ multiple: false, filters: imageFilter });
+    if (typeof picked !== "string") {
+      if (thenPlace && !image) setTool("select");
+      return;
+    }
+    setImage(picked);
+    if (!thenPlace && selected !== null) {
+      touch();
+      patch(selected, { path: picked });
+    }
+  }
+
+  /* ---- pointer work ---- */
+  const ptFrom = (n: number, e: { clientX: number; clientY: number }): Pt => {
+    const el = pageEls.current.get(n)!;
+    const r = el.getBoundingClientRect();
+    const s = sizeOf(n);
+    return { x: ((e.clientX - r.left) / r.width) * s.pw, y: ((e.clientY - r.top) / r.height) * s.ph };
+  };
+  const track = (move: (e: PointerEvent) => void, up: (e: PointerEvent) => void) => {
+    const m = (e: PointerEvent) => move(e);
+    const u = (e: PointerEvent) => {
+      window.removeEventListener("pointermove", m);
+      window.removeEventListener("pointerup", u);
+      window.removeEventListener("pointercancel", u);
+      up(e);
+    };
+    window.addEventListener("pointermove", m);
+    window.addEventListener("pointerup", u);
+    window.addEventListener("pointercancel", u);
+  };
+
+  const dropFocus = () => {
+    const a = document.activeElement as HTMLElement | null;
+    if (a && a.closest("input, select, textarea")) a.blur();
+  };
+
+  function onItemDown(e: RPointerEvent, op: PdfItem) {
+    if (e.button !== 0) return;
+    if (!(tool === "text" && op.type === "text")) dropFocus();
+    if (tool === "text" && op.type === "text") {
+      e.stopPropagation();
+      startEdit(op.id);
+      return;
+    }
+    if (tool !== "select") return; // let the page start drawing
+    e.stopPropagation();
+    e.preventDefault();
+    commitIfEmpty();
+    setSelected(op.id);
+    if (editing === op.id) return;
+    const start = ptFrom(op.page, e);
+    let last = start;
+    let moved = false;
+    track(
+      (ev) => {
+        const p = ptFrom(op.page, ev);
+        if (!moved && Math.hypot(p.x - start.x, p.y - start.y) < 3) return;
+        moved = true;
+        touch();
+        const dx = p.x - last.x, dy = p.y - last.y;
+        last = p;
+        setOps((cur) => cur.map((o) => (o.id === op.id ? ({ ...o, ...translate(o, dx, dy) } as PdfItem) : o)));
+      },
+      () => undefined,
+    );
+  }
+
+  function onHandle(op: PdfItem, id: HandleId, e: RPointerEvent) {
+    const n = op.page;
+    const el = pageEls.current.get(n)!;
+    const size = sizeOf(n);
+    const k = size.pw / el.clientWidth; // points per screen pixel
+    const dom = el.querySelector<HTMLElement>(`[data-oid="${op.id}"]`);
+    const wPt = (dom?.offsetWidth ?? 100) * k;
+    const hPt = (dom?.offsetHeight ?? 20) * k;
+    const o = { ...op };
+    void e;
+    track(
+      (ev) => {
+        const p = ptFrom(n, ev);
+        touch();
+        if (op.type === "text") {
+          const th = (num(o.rotate) * Math.PI) / 180;
+          const dir = { x: Math.cos(th), y: Math.sin(th) };
+          const ox = num(o.x), oy = num(o.y);
+          const proj = (p.x - ox) * dir.x + (p.y - oy) * dir.y;
+          if (id === "e") patch(op.id, { width: Math.max(24, Math.round(proj)) });
+          else if (id === "se") {
+            const ratio = Math.max(0.2, proj / Math.max(1, wPt));
+            patch(op.id, { size: Math.min(200, Math.max(4, Math.round(num(o.size, 14) * ratio * 10) / 10)), ...(num(o.width) ? { width: Math.max(24, num(o.width) * ratio) } : {}) });
+          } else if (id === "rot") {
+            const base = (Math.atan2(-26 * k, wPt / 2) * 180) / Math.PI;
+            let deg = (Math.atan2(p.y - oy, p.x - ox) * 180) / Math.PI - base;
+            deg = ((deg + 540) % 360) - 180;
+            if (Math.abs(deg % 15) < 3 || ev.shiftKey) deg = Math.round(deg / 15) * 15;
+            patch(op.id, { rotate: Math.round(deg) });
+          }
+          return;
+        }
+        if (op.type === "line" || op.type === "arrow") {
+          patch(op.id, id === "p0" ? { x0: p.x, y0: p.y } : { x1: p.x, y1: p.y });
+          return;
+        }
+        if (op.type === "image") {
+          const x0 = num(o.x0), y0 = num(o.y0), w = num(o.w, 150);
+          const h = num(o.h, hPt);
+          if (id === "rot") {
+            const c = { x: x0 + w / 2, y: y0 + h / 2 };
+            let deg = (Math.atan2(p.y - c.y, p.x - c.x) * 180) / Math.PI + 90;
+            deg = ((deg + 540) % 360) - 180;
+            if (Math.abs(deg % 15) < 3 || ev.shiftKey) deg = Math.round(deg / 15) * 15;
+            patch(op.id, { rotate: Math.round(deg) });
+            return;
+          }
+          let r = { x0, y0, x1: x0 + w, y1: y0 + h };
+          r = sideResize(r, id, p);
+          let nw = Math.max(10, r.x1 - r.x0), nh = Math.max(10, r.y1 - r.y0);
+          if (id.length === 2 && !ev.shiftKey) {
+            nh = (nw * h) / w;
+            if (id.includes("n")) r.y0 = r.y1 - nh;
+          }
+          patch(op.id, { x0: r.x0, y0: r.y0, w: nw, h: nh });
+          return;
+        }
+        // rectangles and markup
+        const r = sideResize({ x0: num(o.x0), y0: num(o.y0), x1: num(o.x1), y1: num(o.y1) }, id, p);
+        patch(op.id, { x0: Math.min(r.x0, r.x1), y0: Math.min(r.y0, r.y1), x1: Math.max(r.x0 + 4, r.x1), y1: Math.max(r.y0 + 4, r.y1) });
+      },
+      () => undefined,
+    );
+  }
+
+  function onPageDown(n: number, e: RPointerEvent) {
+    if (e.button !== 0) return;
+    const p = ptFrom(n, e);
+    e.preventDefault();
+    dropFocus();
+    commitIfEmpty();
+    setCurrent(n);
+    if (tool === "select") {
+      setSelected(null);
+      setEditing(null);
+      return;
+    }
+    if (tool === "image" && !image) return;
+    setSelected(null);
+    const t = tool;
+    let g: Ghost = { page: n, tool: t, a: p, b: p, path: [p], moved: false };
+    setGhost(g);
+    track(
+      (ev) => {
+        const q = ptFrom(n, ev);
+        g = { ...g, b: q, moved: g.moved || Math.hypot(q.x - g.a.x, q.y - g.a.y) > 3, path: t === "pen" ? [...g.path, q] : g.path };
+        setGhost(g);
+      },
+      () => {
+        setGhost(null);
+        place(g);
+      },
+    );
+  }
+
+  function place(g: Ghost) {
+    const { a, b, path, moved, tool: t, page } = g;
+    const r = normalizeRect(a, b);
+    const big = r.x1 - r.x0 > 5 && r.y1 - r.y0 > 5;
+    const base = { page };
+    const keep = STICKY.includes(t);
+    const done = (item: PdfItem | null, edit = false) => {
+      if (!item) return;
+      if (!keep) {
+        setTool("select");
+        setSelected(item.id);
+      }
+      if (edit) {
+        setSelected(item.id);
+        setEditing(item.id);
+      }
+    };
+    switch (t) {
+      case "text": {
+        const item = add({ ...base, type: "text", x: moved && big ? r.x0 : a.x, y: moved && big ? r.y0 : a.y - defs.size * 0.5, text: "", size: defs.size, font: defs.font, bold: defs.bold, italic: defs.italic, color: defs.color, opacity: defs.opacity, ...(moved && big ? { width: r.x1 - r.x0 } : {}) }, { quiet: true });
+        done(item, true);
+        return;
+      }
+      case "stamp":
+        done(add({ ...base, type: "text", x: a.x - 60, y: a.y - 14, text: stamp.text, size: 28, bold: true, color: stamp.color, border: stamp.color, background: "#ffffff", opacity: 0.9, rotate: -12, font: defs.font }));
+        return;
+      case "note": {
+        const item = add({ ...base, type: "note", x: a.x, y: a.y, text: "", color: defs.color });
+        done(item);
+        setFocusTick((n) => n + 1);
+        return;
+      }
+      case "link": {
+        if (!big) return;
+        const item = add({ ...base, type: "link", ...r });
+        done(item);
+        setFocusTick((n) => n + 1);
+        return;
+      }
+      case "image":
+        if (!image) return;
+        done(add({ ...base, type: "image", path: image, x0: moved && big ? r.x0 : a.x, y0: moved && big ? r.y0 : a.y, w: moved && big ? r.x1 - r.x0 : 160, opacity: defs.opacity }));
+        return;
+      case "highlight":
+      case "underline":
+      case "strike":
+        if (big) done(add({ ...base, type: t, ...r, color: defs.color, opacity: defs.opacity }));
+        return;
+      case "rect":
+      case "ellipse":
+        if (big) done(add({ ...base, type: t, ...r, color: defs.color, width: defs.width, opacity: defs.opacity, ...(defs.fill ? { fill: defs.fillColor } : {}) }));
+        return;
+      case "erase":
+      case "redact":
+        if (big) done(add({ ...base, type: t, ...r }));
+        return;
+      case "line":
+      case "arrow":
+        if (moved) done(add({ ...base, type: t, x0: a.x, y0: a.y, x1: b.x, y1: b.y, color: defs.color, width: defs.width, opacity: defs.opacity }));
+        return;
+      case "pen":
+        if (moved) done(add({ ...base, type: "ink", strokes: [simplify(path).map((p) => [p.x, p.y])], color: defs.color, width: defs.width, opacity: defs.opacity }));
+        return;
+    }
+  }
+
+  /* ---- keyboard ---- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).closest("input, textarea, select")) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      const k = e.key.toLowerCase();
+      const mod = e.ctrlKey || e.metaKey;
+      const sel = opsRef.current.find((o) => o.id === selected);
+      if (mod && k === "z") {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      } else if (mod && k === "y") {
         e.preventDefault();
         redo();
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selected !== null) {
+      } else if (mod && k === "d" && sel) {
         e.preventDefault();
-        remove(selected);
-      } else if (e.key === "Escape") {
+        duplicate(sel);
+      } else if (mod && k === "c" && sel) {
+        clip.current = sel;
+      } else if (mod && k === "v" && clip.current) {
+        e.preventDefault();
+        const { id: _id, ...rest } = clip.current;
+        void _id;
+        const item = add({ ...translate(rest as PdfOp, 14, 14), page: current });
+        setSelected(item.id);
+      } else if ((k === "delete" || k === "backspace") && sel) {
+        e.preventDefault();
+        remove(sel.id);
+      } else if (k === "enter" && sel?.type === "text") {
+        e.preventDefault();
+        startEdit(sel.id);
+      } else if (k === "escape") {
         setSelected(null);
-        setPrompt(null);
-        setStamp(null);
+        setTool("select");
+      } else if (sel && k.startsWith("arrow")) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const d = { arrowleft: [-step, 0], arrowright: [step, 0], arrowup: [0, -step], arrowdown: [0, step] }[k]!;
+        touch();
+        setOps((cur) => cur.map((o) => (o.id === sel.id ? ({ ...o, ...translate(o, d[0], d[1]) } as PdfItem) : o)));
+      } else if (!mod && !e.altKey) {
+        const t = ALL_TOOLS.find((x) => x.key && x.key.toLowerCase() === k);
+        if (t) pickTool(t.id);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [undo, redo, selected, ops]);
+  }, [undo, redo, selected, editing, current, image]);
 
   async function choose() {
     const picked = await open({ multiple: false, filters: pdfFilter });
@@ -181,135 +568,32 @@ export function PdfEditor({ onDone }: { onDone: () => void }) {
     setOps([]);
     setPast([]);
     setFuture([]);
-    setPage(1);
+    setPages(new Map());
+    loading.current = new Set();
+    pageEls.current = new Map();
+    setCurrent(1);
     setSelected(null);
+    setEditing(null);
+    setTool("select");
     setMessage("");
-  }
-
-  function pickTool(t: Tool) {
-    setTool(t);
-    setPrompt(null);
-    setStamp(null);
-    if (DEFAULT_COLOR[t]) setColor(DEFAULT_COLOR[t]!);
-    if (t === "highlight") setOpacity(0.5);
-    else if (["underline", "strike"].includes(t)) setOpacity(1);
-  }
-
-  /* ---- pointer handling on the page ---- */
-  const toPt = (e: { clientX: number; clientY: number }): Pt => {
-    const r = wrap.current!.getBoundingClientRect();
-    return { x: ((e.clientX - r.left) / r.width) * data!.page_width, y: ((e.clientY - r.top) / r.height) * data!.page_height };
-  };
-
-  function finish(d: Drag & { kind: "draw" }) {
-    const { a, b, path, moved } = d;
-    const r = normalizeRect(a, b);
-    const big = r.x1 - r.x0 > 4 && r.y1 - r.y0 > 4;
-    const base = { page };
-    switch (tool) {
-      case "text":
-        if (stamp && !moved) {
-          add({ ...base, type: "text", x: a.x - 40, y: a.y - 10, text: stamp.text, size: 28, bold: true, color: stamp.color, border: stamp.color, background: "#ffffff", opacity: 0.9, rotate: -12, font });
-          return;
-        }
-        setPrompt({ kind: "text", at: a, box: moved && big ? r : undefined });
-        return;
-      case "note":
-        setPrompt({ kind: "note", at: a });
-        return;
-      case "link":
-        if (big) setPrompt({ kind: "link", at: { x: r.x0, y: r.y0 }, box: r });
-        return;
-      case "image":
-        if (!image) return setMessage("Choose an image first (options on the right).");
-        add({ ...base, type: "image", path: image, x0: moved && big ? r.x0 : a.x, y0: moved && big ? r.y0 : a.y, ...(moved && big ? { w: r.x1 - r.x0 } : { w: 160 }), opacity });
-        return;
-      case "highlight":
-      case "underline":
-      case "strike":
-        if (big) add({ ...base, type: tool, ...r, color, opacity });
-        return;
-      case "rect":
-      case "ellipse":
-        if (big) add({ ...base, type: tool, ...r, color, width, opacity, ...(fill ? { fill: fillColor } : {}) });
-        return;
-      case "erase":
-      case "redact":
-        if (big) add({ ...base, type: tool, ...r });
-        return;
-      case "line":
-      case "arrow":
-        if (moved) add({ ...base, type: tool, x0: a.x, y0: a.y, x1: b.x, y1: b.y, color, width, opacity });
-        return;
-      case "pen":
-        if (moved) add({ ...base, type: "ink", strokes: [simplify(path).map((p) => [p.x, p.y])], color, width, opacity });
-        return;
-    }
-  }
-
-  function onDown(e: React.PointerEvent) {
-    if (e.button !== 0 || !data || prompt) return;
-    const p = toPt(e);
-    if (tool === "select") {
-      const hit = hitTest(boxes, p);
-      if (hit >= 0) {
-        const item = ops[hit];
-        setSelected(item.id);
-        e.currentTarget.setPointerCapture(e.pointerId);
-        setGhost({ kind: "move", id: item.id, last: p, moved: false });
-        return;
-      }
-      setSelected(null);
-      return;
-    }
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setGhost({ kind: "draw", a: p, b: p, path: [p], moved: false });
-  }
-  function onMove(e: React.PointerEvent) {
-    if (!ghost || !data) return;
-    const p = toPt(e);
-    if (ghost.kind === "move") {
-      const dx = p.x - ghost.last.x, dy = p.y - ghost.last.y;
-      if (!ghost.moved && Math.hypot(dx, dy) < 2) return;
-      if (!ghost.moved) record();
-      patch(ghost.id, translate(ops.find((o) => o.id === ghost.id)!, dx, dy));
-      setGhost({ ...ghost, last: p, moved: true });
-      return;
-    }
-    const moved = ghost.moved || Math.hypot(p.x - ghost.a.x, p.y - ghost.a.y) > 3;
-    setGhost({ ...ghost, b: p, moved, path: tool === "pen" ? [...ghost.path, p] : ghost.path });
-  }
-  function onUp() {
-    const g = ghost;
-    setGhost(null);
-    if (g?.kind === "draw") finish(g);
-  }
-
-  function submitPrompt(text: string) {
-    const pr = prompt;
-    setPrompt(null);
-    if (!pr || !text.trim()) return;
-    if (pr.kind === "text") {
-      add({ page, type: "text", x: pr.box ? pr.box.x0 : pr.at.x, y: pr.box ? pr.box.y0 : pr.at.y, text, size, font, bold, italic, color, opacity, ...(pr.box ? { width: pr.box.x1 - pr.box.x0 } : {}) });
-    } else if (pr.kind === "note") {
-      add({ page, type: "note", x: pr.at.x, y: pr.at.y, text, color });
-    } else if (pr.box) {
-      const t = text.trim();
-      add({ page, type: "link", ...pr.box, ...(/^\d+$/.test(t) ? { target_page: Number(t) } : { uri: /^(https?:\/\/|mailto:)/.test(t) ? t : `https://${t}` }) });
-    }
   }
 
   async function saveCopy() {
     if (!file) return;
+    const keep = ops.filter((o) => !isEmptyItem(o)).map((o) => (o.type === "link" && o.uri && !/^(https?:\/\/|mailto:)/.test(String(o.uri)) ? { ...o, uri: `https://${String(o.uri)}` } : o));
     const output = await save({ filters: pdfFilter, defaultPath: baseName(file).replace(/\.pdf$/i, "") + "-edited.pdf" });
-    if (output) await task.run("/pdf/edit", { input: file, output, ops: ops.map(({ id: _id, ...o }) => (void _id, o)), flatten });
+    if (output) await task.run("/pdf/edit", { input: file, output, ops: strip(keep), flatten });
   }
+
+  const changedPages = useMemo(() => pagesWithEdits(ops), [ops]);
+  const sel = ops.find((o) => o.id === selected) ?? null;
+  const active = ALL_TOOLS.find((t) => t.id === tool)!;
 
   if (!file) {
     return (
       <div className="photo empty">
         <h1>PDF editor</h1>
-        <p className="muted">Add text, signatures and images, highlight, draw, leave notes, add links, erase or black out content. Every change is a step you can undo or remove. The original is never changed.</p>
+        <p className="muted">Add text, signatures and images, highlight, draw, leave notes, add links, erase or black out content. Click anything you placed to change it. The original is never changed.</p>
         <div className="actions">
           <button className="primary" onClick={choose}>
             Open a PDF…
@@ -319,34 +603,86 @@ export function PdfEditor({ onDone }: { onDone: () => void }) {
     );
   }
 
-  const pct = (v: number, of: number) => `${(v / of) * 100}%`;
-  const active = TOOLS.find((t) => t.id === tool)!;
-  const grouped = groupByPage(ops);
-  const needsStroke = ["rect", "ellipse", "line", "arrow", "pen"].includes(tool);
+  const pageWidth = fitW * zoom;
+  const pageNumbers = Array.from({ length: total }, (_, i) => i + 1);
 
   return (
     <div className="pdfedit">
-      <div className="toolbar" role="toolbar" aria-label="Editing tools">
-        {TOOLS.map(({ id, label, Icon }) => (
-          <button key={id} className={tool === id ? "on" : ""} aria-pressed={tool === id} aria-label={label} title={label} onClick={() => pickTool(id)}>
-            <Icon size={16} strokeWidth={1.5} aria-hidden />
-            <span>{label}</span>
-          </button>
-        ))}
+      <div className="pdftop">
+        <span className="chip" title={file}>
+          <b>{baseName(file)}</b>
+          <span className="muted">
+            Page {current} of {total || "…"}
+          </span>
+        </span>
         <span className="spacer" />
-        <button className="icon" aria-label="Undo" disabled={!past.length} onClick={undo}>
+        <button className="icon" aria-label="Zoom out" disabled={zoom <= 0.5} onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}>
+          <ZoomOut size={16} strokeWidth={1.5} />
+        </button>
+        <button className="zoomval" aria-label="Fit page width" onClick={() => setZoom(1)}>
+          {Math.round(zoom * 100)}%
+        </button>
+        <button className="icon" aria-label="Zoom in" disabled={zoom >= 2} onClick={() => setZoom((z) => Math.min(2, +(z + 0.25).toFixed(2)))}>
+          <ZoomIn size={16} strokeWidth={1.5} />
+        </button>
+        <button className="icon" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!past.length} onClick={undo}>
           <Undo2 size={16} strokeWidth={1.5} />
         </button>
-        <button className="icon" aria-label="Redo" disabled={!future.length} onClick={redo}>
+        <button className="icon" aria-label="Redo" title="Redo (Ctrl+Y)" disabled={!future.length} onClick={redo}>
           <Redo2 size={16} strokeWidth={1.5} />
         </button>
         <button onClick={choose}>Open another…</button>
+        <label className="flatten" title="Makes highlights, shapes and notes part of the page so they cannot be edited later.">
+          <input type="checkbox" checked={flatten} onChange={(e) => setFlatten(e.target.checked)} /> Flatten
+        </label>
+        <button className="primary" disabled={!ops.some((o) => !isEmptyItem(o)) || task.busy} onClick={saveCopy}>
+          {task.busy ? "Saving…" : "Save a copy…"}
+        </button>
       </div>
 
+      <ContextBar
+        tool={tool}
+        hint={active.hint}
+        sel={sel}
+        defs={defs}
+        setDefs={setDefs}
+        fonts={fonts}
+        stamp={stamp}
+        setStamp={setStamp}
+        image={image}
+        touch={touch}
+        patch={patch}
+        onDelete={() => sel && remove(sel.id)}
+        onDuplicate={() => sel && duplicate(sel)}
+        onReplaceImage={() => chooseImage(false)}
+        onPickImage={() => chooseImage(false)}
+        focusTick={focusTick}
+      />
+      {(task.busy || task.message || message) && (
+        <div className="pdfstatus">
+          {task.busy && <ProgressBar progress={task.progress} onCancel={task.cancel} />}
+          <Message m={task.message ?? (message ? { ok: false, text: message } : null)} />
+        </div>
+      )}
+
       <div className="pdfmain">
+        <nav className="toolrail" aria-label="Editing tools">
+          {GROUPS.map((g) => (
+            <div key={g.title || "select"} className="toolgroup" role="group" aria-label={g.title || "Select"}>
+              {g.title && <span className="grouptitle">{g.title}</span>}
+              {g.tools.map(({ id, label, Icon, key }) => (
+                <button key={id} className={tool === id ? "on" : ""} aria-pressed={tool === id} aria-label={label} title={key ? `${label} (${key})` : label} onClick={() => pickTool(id)}>
+                  <Icon size={17} strokeWidth={1.5} aria-hidden />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
         <div className="strip" aria-label="Pages">
-          {Array.from({ length: total }, (_, i) => i + 1).map((n) => (
-            <button key={n} className={`${n === page ? "on" : ""}`} aria-label={`Page ${n}${changedPages.has(n) ? " (edited)" : ""}`} onClick={() => setPage(n)}>
+          {pageNumbers.map((n) => (
+            <button key={n} className={n === current ? "on" : ""} aria-label={`Page ${n}${changedPages.has(n) ? " (edited)" : ""}`} onClick={() => scrollToPage(n)}>
               {thumbs.get(n) ? <img src={thumbSrc(thumbs.get(n)!)} alt="" draggable={false} /> : <span className="ph" />}
               <span className="mono">
                 {n}
@@ -356,192 +692,294 @@ export function PdfEditor({ onDone }: { onDone: () => void }) {
           ))}
         </div>
 
-        <div className="pagecol">
-          {data ? <PageNav page={page} total={data.total} onChange={setPage} /> : null}
-          <p className="hint tool-hint">{active.hint}</p>
-          {error && <p className="msg bad">{error}</p>}
-          {data && (
-            <div className={loading ? "preview loading" : "preview"}>
-              <div
-                ref={wrap}
-                className={`page editable tool-${tool}`}
-                style={{ aspectRatio: `${data.page_width} / ${data.page_height}`, ["--ar" as string]: data.page_width / data.page_height } as React.CSSProperties}
-                onPointerDown={onDown}
-                onPointerMove={onMove}
-                onPointerUp={onUp}
-              >
-                <img src={`data:image/png;base64,${data.image}`} alt={`Page ${data.page}`} draggable={false} />
-                <svg className="overlay" viewBox={`0 0 ${data.page_width} ${data.page_height}`} preserveAspectRatio="none" aria-hidden>
-                  {boxes.map((b) => {
-                    const isSel = ops[b.index]?.id === selected;
-                    if (!isSel && tool !== "select") return null;
-                    return <rect key={b.index} className={isSel ? "selbox" : "hoverbox"} x={b.rect[0]} y={b.rect[1]} width={b.rect[2] - b.rect[0]} height={b.rect[3] - b.rect[1]} />;
-                  })}
-                  {ghost?.kind === "draw" && ghost.moved && <Ghost tool={tool} g={ghost} color={color} />}
-                </svg>
-                {prompt && (
-                  <PromptBox
-                    key={`${prompt.kind}${prompt.at.x}${prompt.at.y}`}
-                    prompt={prompt}
-                    style={{ left: pct(Math.min(prompt.at.x, data.page_width - 230), data.page_width), top: pct(Math.min(prompt.at.y, data.page_height - 120), data.page_height) }}
-                    onSubmit={submitPrompt}
-                    onCancel={() => setPrompt(null)}
-                  />
-                )}
-              </div>
-            </div>
-          )}
+        <div className="pagecol" ref={col} onScroll={onScroll}>
+          {pageNumbers.map((n) => (
+            <PageView
+              key={n}
+              n={n}
+              width={pageWidth}
+              size={sizeOf(n)}
+              data={pages.get(n)}
+              need={loadPage}
+              register={(el) => (el ? pageEls.current.set(n, el) : pageEls.current.delete(n))}
+              items={ops.filter((o) => o.page === n)}
+              selected={selected}
+              editing={editing}
+              tool={tool}
+              ghost={ghost?.page === n ? ghost : null}
+              ghostColor={defs.color}
+              onPageDown={onPageDown}
+              onItemDown={onItemDown}
+              onDouble={(o) => {
+                if (o.type === "text") startEdit(o.id);
+                else {
+                  setSelected(o.id);
+                  setFocusTick((t) => t + 1);
+                }
+              }}
+              onHandle={onHandle}
+              onText={(id, text) => {
+                touch();
+                patch(id, { text });
+              }}
+              onCommit={commitText}
+            />
+          ))}
         </div>
-
-        <aside className="side pdfside">
-          <section>
-            <h2>{active.label}</h2>
-            {(tool === "text" || tool === "note") && (
-              <>
-                {tool === "text" && (
-                  <>
-                    <SelectField id="pe-font" label="Font" value={font} onChange={setFont} options={fonts.map((f) => ({ id: f, label: f }))} />
-                    <Slider label="Size" value={size} min={6} max={96} unit=" pt" reset={14} onChange={setSize} />
-                    <div className="checks">
-                      <CheckField label="Bold" checked={bold} onChange={setBold} />
-                      <CheckField label="Italic" checked={italic} onChange={setItalic} />
-                    </div>
-                    <span className="label">Stamps</span>
-                    <div className="stamps">
-                      {STAMPS.map((s) => (
-                        <button key={s.text} className={stamp?.text === s.text ? "on" : ""} aria-pressed={stamp?.text === s.text} style={stamp?.text === s.text ? { color: "#fff", background: s.color, borderColor: s.color } : { color: s.color, borderColor: s.color }} onClick={() => setStamp(stamp?.text === s.text ? null : s)}>
-                          {s.text}
-                        </button>
-                      ))}
-                    </div>
-                    {stamp && <p className="hint">Click on the page to place the {stamp.text} stamp. Esc cancels.</p>}
-                  </>
-                )}
-              </>
-            )}
-            {tool === "image" && (
-              <>
-                <SourceField label="Image or signature" file={image} onPick={setImage} filters={imageFilter} />
-                <p className="hint">A PNG with a transparent background works best for signatures.</p>
-              </>
-            )}
-            {tool !== "select" && !["erase", "redact", "link", "image"].includes(tool) && !stamp && <ColorInput label="Color" value={color} onChange={setColor} />}
-            {needsStroke && <Slider label="Line width" value={width} min={1} max={20} unit=" pt" reset={2} onChange={setWidth} />}
-            {(tool === "rect" || tool === "ellipse") && (
-              <>
-                <CheckField label="Fill" checked={fill} onChange={setFill} />
-                {fill && <ColorInput label="Fill color" value={fillColor} onChange={setFillColor} />}
-              </>
-            )}
-            {["text", "image", "highlight", "rect", "ellipse", "line", "arrow", "pen"].includes(tool) && <Slider label="Opacity" value={opacity} min={0.1} max={1} step={0.05} reset={1} onChange={setOpacity} />}
-            {tool === "redact" && <p className="hint">Redaction removes the text and images underneath for good when you save.</p>}
-          </section>
-
-          {sel && sel.type === "text" && (
-            <section>
-              <h2>Selected text</h2>
-              <div className="field">
-                <textarea aria-label="Selected text" rows={2} value={String(sel.text ?? "")} onFocus={begin} onBlur={end} onChange={(e) => patch(sel.id, { text: e.target.value })} />
-              </div>
-              <Slider label="Size" value={Number(sel.size ?? 14)} min={6} max={96} unit=" pt" onStart={begin} onEnd={end} onChange={(v) => patch(sel.id, { size: v })} />
-              <ColorInput label="Color" value={String(sel.color ?? "#111111")} onChange={(c) => patch(sel.id, { color: c })} />
-              <Slider label="Rotate" value={Number(sel.rotate ?? 0)} min={-180} max={180} unit="°" onStart={begin} onEnd={end} onChange={(v) => patch(sel.id, { rotate: v })} />
-            </section>
-          )}
-          {sel && sel.type !== "text" && ["rect", "ellipse", "line", "arrow", "ink", "highlight", "underline", "strike"].includes(sel.type) && (
-            <section>
-              <h2>Selected {describe(sel).toLowerCase()}</h2>
-              <ColorInput label="Color" value={String(sel.color ?? "#d4472b")} onChange={(c) => patch(sel.id, { color: c })} />
-              {["rect", "ellipse", "line", "arrow", "ink"].includes(sel.type) && (
-                <Slider label="Line width" value={Number(sel.width ?? 2)} min={1} max={20} onStart={begin} onEnd={end} onChange={(v) => patch(sel.id, { width: v })} />
-              )}
-            </section>
-          )}
-
-          <section className="changes">
-            <h2>Changes ({ops.length})</h2>
-            {ops.length === 0 ? (
-              <p className="muted">Nothing changed yet.</p>
-            ) : (
-              grouped.map(([pg, list]) => (
-                <div key={pg} className="pagegroup">
-                  <button className={`pagehead ${pg === page ? "on" : ""}`} onClick={() => setPage(pg)}>
-                    Page {pg} <small>{list.length}</small>
-                  </button>
-                  <ul className="editlist">
-                    {list.map((o) => (
-                      <li key={o.id} className={o.id === selected ? "sel" : ""}>
-                        <button className="rowbtn" onClick={() => { setSelected(o.id); setPage(o.page); }}>
-                          {describe(o)}
-                        </button>
-                        <button className="icon text" aria-label={`Remove: ${describe(o)}`} onClick={() => remove(o.id)}>
-                          Remove
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))
-            )}
-            <div className="actions tight">
-              <button disabled={!ops.length} onClick={() => { record(); setOps([]); setSelected(null); }}>
-                Clear all
-              </button>
-            </div>
-          </section>
-
-          <section>
-            <CheckField label="Flatten annotations" checked={flatten} onChange={setFlatten} hint="Makes highlights, shapes and notes part of the page so they cannot be edited later." />
-            <RunBar label="Save a copy…" busyLabel="Saving…" disabled={!ops.length} onRun={saveCopy} task={task} />
-            {message && <p className="msg bad">{message}</p>}
-          </section>
-        </aside>
       </div>
     </div>
   );
 }
 
-/** Outline of what the user is currently dragging, in page points. */
-function Ghost({ tool, g, color }: { tool: Tool; g: Extract<Drag, { kind: "draw" }>; color: string }) {
+/** Moves the sides named by a handle id to the pointer. */
+function sideResize(r: { x0: number; y0: number; x1: number; y1: number }, id: HandleId, p: Pt) {
+  const out = { ...r };
+  if (id.includes("w")) out.x0 = Math.min(p.x, r.x1 - 6);
+  if (id.includes("e")) out.x1 = Math.max(p.x, r.x0 + 6);
+  if (id.includes("n")) out.y0 = Math.min(p.y, r.y1 - 6);
+  if (id.includes("s")) out.y1 = Math.max(p.y, r.y0 + 6);
+  return out;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+
+type PageViewProps = {
+  n: number;
+  width: number;
+  size: Size;
+  data?: PageData;
+  need: (n: number) => void;
+  register: (el: HTMLDivElement | null) => void;
+  items: PdfItem[];
+  selected: number | null;
+  editing: number | null;
+  tool: Tool;
+  ghost: Ghost | null;
+  ghostColor: string;
+  onPageDown: (n: number, e: RPointerEvent) => void;
+  onItemDown: (e: RPointerEvent, op: PdfItem) => void;
+  onDouble: (op: PdfItem) => void;
+  onHandle: (op: PdfItem, id: HandleId, e: RPointerEvent) => void;
+  onText: (id: number, text: string) => void;
+  onCommit: (id: number) => void;
+};
+
+function PageView(p: PageViewProps) {
+  const el = useRef<HTMLDivElement>(null);
+  const { n, size, data, need } = p;
+
+  useEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    if (typeof IntersectionObserver === "undefined") return need(n);
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && need(n), { rootMargin: "900px 0px" });
+    io.observe(node);
+    return () => io.disconnect();
+  }, [n, need]);
+
+  const vectors = p.items.filter((o) => SVG_TYPES.includes(o.type));
+  const html = p.items.filter((o) => !SVG_TYPES.includes(o.type));
+  const sel = p.items.find((o) => o.id === p.selected);
+  const common = { pw: size.pw, ph: size.ph, onDown: p.onItemDown, onDouble: p.onDouble };
+
+  return (
+    <div className="pagewrap" data-page={n}>
+      <div
+        ref={(node) => {
+          el.current = node;
+          p.register(node);
+        }}
+        className={`page editable tool-${p.tool}`}
+        style={{ width: p.width, aspectRatio: `${size.pw} / ${size.ph}` }}
+        onPointerDown={(e) => p.onPageDown(n, e)}
+      >
+        {data ? <img src={`data:image/png;base64,${data.image}`} alt={`Page ${n}`} draggable={false} /> : <span className="pagewait mono">Page {n}</span>}
+        <svg className="vec" viewBox={`0 0 ${size.pw} ${size.ph}`} preserveAspectRatio="none">
+          {vectors.map((o) => (
+            <VectorItem key={o.id} op={o} selected={o.id === p.selected} {...common} />
+          ))}
+          {p.ghost?.moved && <GhostShape g={p.ghost} color={p.ghostColor} />}
+        </svg>
+        <div className="htmlobjs">
+          {html.map((o) => (
+            <HtmlItem key={o.id} op={o} selected={o.id === p.selected} editing={o.id === p.editing} onHandle={(id, e) => p.onHandle(o, id, e)} onText={p.onText} onCommit={p.onCommit} {...common} />
+          ))}
+        </div>
+        <div className="selayer">{sel && SVG_TYPES.includes(sel.type) && <VectorFrame op={sel} pw={size.pw} ph={size.ph} onHandle={(id, e) => p.onHandle(sel, id, e)} />}</div>
+      </div>
+    </div>
+  );
+}
+
+function GhostShape({ g, color }: { g: Ghost; color: string }) {
   const r = normalizeRect(g.a, g.b);
   const common = { fill: "none", stroke: color, strokeWidth: 1.5, strokeDasharray: "4 3", vectorEffect: "non-scaling-stroke" as const };
-  if (tool === "pen") return <polyline points={g.path.map((p) => `${p.x},${p.y}`).join(" ")} {...common} strokeDasharray="none" strokeWidth={2} />;
-  if (tool === "line" || tool === "arrow") return <line x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y} {...common} />;
-  if (tool === "ellipse") return <ellipse cx={(r.x0 + r.x1) / 2} cy={(r.y0 + r.y1) / 2} rx={(r.x1 - r.x0) / 2} ry={(r.y1 - r.y0) / 2} {...common} />;
-  const fillTool = tool === "highlight" ? "rgba(255,230,0,0.35)" : tool === "redact" ? "rgba(0,0,0,0.75)" : tool === "erase" ? "rgba(255,255,255,0.85)" : "none";
-  return <rect x={r.x0} y={r.y0} width={r.x1 - r.x0} height={r.y1 - r.y0} {...common} fill={fillTool} />;
+  if (g.tool === "pen") return <polyline points={g.path.map((p) => `${p.x},${p.y}`).join(" ")} {...common} strokeDasharray="none" strokeWidth={2} />;
+  if (g.tool === "line" || g.tool === "arrow") return <line x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y} {...common} />;
+  if (g.tool === "ellipse") return <ellipse cx={(r.x0 + r.x1) / 2} cy={(r.y0 + r.y1) / 2} rx={(r.x1 - r.x0) / 2} ry={(r.y1 - r.y0) / 2} {...common} />;
+  const fill = g.tool === "highlight" ? "rgba(255,230,0,0.35)" : g.tool === "redact" ? "rgba(0,0,0,0.75)" : g.tool === "erase" ? "rgba(255,255,255,0.85)" : "none";
+  return <rect x={r.x0} y={r.y0} width={r.x1 - r.x0} height={r.y1 - r.y0} {...common} fill={fill} />;
 }
 
-function PromptBox({ prompt, style, onSubmit, onCancel }: { prompt: Prompt; style: React.CSSProperties; onSubmit: (t: string) => void; onCancel: () => void }) {
-  const [text, setText] = useState("");
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => ref.current?.focus(), []);
-  const label = prompt.kind === "link" ? "Web address or page number" : prompt.kind === "note" ? "Note" : "Text";
+/* ------------------------------------------------------------------------------------------ */
+
+type BarProps = {
+  tool: Tool;
+  hint: string;
+  sel: PdfItem | null;
+  defs: Defaults;
+  setDefs: (f: (d: Defaults) => Defaults) => void;
+  fonts: string[];
+  stamp: (typeof STAMPS)[number];
+  setStamp: (s: (typeof STAMPS)[number]) => void;
+  image: string | null;
+  touch: () => void;
+  patch: (id: number, c: Partial<PdfOp>) => void;
+  onDelete: () => void;
+  onDuplicate: () => void;
+  onReplaceImage: () => void;
+  onPickImage: () => void;
+  focusTick: number;
+};
+
+/** The one place where options live: it shows the settings of whatever is selected, or of the tool in use. */
+function ContextBar({ tool, hint, sel, defs, setDefs, fonts, stamp, setStamp, image, touch, patch, onDelete, onDuplicate, onReplaceImage, onPickImage, focusTick }: BarProps) {
+  const text = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusTick) setTimeout(() => text.current?.focus(), 60);
+  }, [focusTick]);
+
+  const type = sel ? (sel.type === "ink" ? "pen" : sel.type) : tool;
+  const val = <K extends keyof Defaults>(k: K): Defaults[K] => (sel && sel[k] !== undefined ? (sel[k] as Defaults[K]) : defs[k]);
+  const set = (k: keyof Defaults, v: string | number | boolean) => {
+    if (sel) {
+      touch();
+      const key = k === "fill" ? "fill" : k;
+      patch(sel.id, k === "fill" ? { fill: v ? defs.fillColor : undefined } : { [key]: v });
+    }
+    setDefs((d) => ({ ...d, [k]: v }));
+  };
+
+  const hasFont = type === "text";
+  const hasColor = !["select", "erase", "redact", "link", "image", "stamp"].includes(type);
+  const hasWidth = ["rect", "ellipse", "line", "arrow", "pen"].includes(type);
+  const hasFill = type === "rect" || type === "ellipse";
+  const hasOpacity = ["text", "image", "highlight", "rect", "ellipse", "line", "arrow", "pen", "underline", "strike"].includes(type);
+  const label = sel ? describe(sel).split(" “")[0] : ALLLABEL[tool];
+
+  const fillOn = sel ? Boolean(sel.fill) : defs.fill;
+
   return (
-    <div className="promptbox" style={style} onPointerDown={(e) => e.stopPropagation()}>
-      <label className="label" htmlFor="pe-prompt">
-        {label}
-      </label>
-      <textarea
-        id="pe-prompt"
-        ref={ref}
-        rows={prompt.kind === "link" ? 1 : 3}
-        value={text}
-        placeholder={prompt.kind === "link" ? "https://… or 3" : ""}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onSubmit(text);
-          } else if (e.key === "Escape") onCancel();
-        }}
-      />
-      <div className="actions tight">
-        <button className="primary" disabled={!text.trim()} onClick={() => onSubmit(text)}>
-          Add
-        </button>
-        <button onClick={onCancel}>Cancel</button>
-      </div>
+    <div className="ctxbar" role="toolbar" aria-label="Options">
+      <span className="ctxlabel">{label}</span>
+      {!sel && <span className="ctxhint">{hint}</span>}
+      {hasFont && (
+        <>
+          <select aria-label="Font" value={String(val("font"))} onChange={(e) => set("font", e.target.value)}>
+            {(fonts.includes(String(val("font"))) ? fonts : [String(val("font")), ...fonts]).map((f) => (
+              <option key={f}>{f}</option>
+            ))}
+          </select>
+          <span className="stepper">
+            <button className="icon" aria-label="Smaller" onClick={() => set("size", Math.max(4, num(val("size"), 14) - 1))}>−</button>
+            <input aria-label="Size" type="number" min={4} max={200} value={Math.round(num(val("size"), 14) * 10) / 10} onChange={(e) => e.target.value && set("size", Math.min(200, Math.max(4, Number(e.target.value))))} />
+            <button className="icon" aria-label="Larger" onClick={() => set("size", Math.min(200, num(val("size"), 14) + 1))}>+</button>
+          </span>
+          <button className={`icon fmt ${val("bold") ? "on" : ""}`} aria-label="Bold" aria-pressed={Boolean(val("bold"))} onClick={() => set("bold", !val("bold"))}>
+            <b>B</b>
+          </button>
+          <button className={`icon fmt ${val("italic") ? "on" : ""}`} aria-label="Italic" aria-pressed={Boolean(val("italic"))} onClick={() => set("italic", !val("italic"))}>
+            <i>I</i>
+          </button>
+        </>
+      )}
+      {type === "stamp" && (
+        <span className="stamps">
+          {STAMPS.map((s) => (
+            <button key={s.text} className={stamp.text === s.text ? "on" : ""} aria-pressed={stamp.text === s.text} style={stamp.text === s.text ? { color: "#fff", background: s.color, borderColor: s.color } : { color: s.color, borderColor: s.color }} onClick={() => setStamp(s)}>
+              {s.text}
+            </button>
+          ))}
+        </span>
+      )}
+      {hasColor && (
+        <label className="ctl">
+          <span>Color</span>
+          <input type="color" aria-label="Color" value={String(val("color")).slice(0, 7)} onChange={(e) => set("color", e.target.value)} />
+        </label>
+      )}
+      {hasWidth && (
+        <label className="ctl">
+          <span>Width</span>
+          <input type="range" aria-label="Line width" min={1} max={20} value={num(val("width"), 2)} onChange={(e) => set("width", Number(e.target.value))} />
+          <output>{num(val("width"), 2)}</output>
+        </label>
+      )}
+      {hasFill && (
+        <label className="ctl">
+          <input type="checkbox" checked={fillOn} onChange={(e) => set("fill", e.target.checked)} />
+          <span>Fill</span>
+          {fillOn && (
+            <input
+              type="color"
+              aria-label="Fill color"
+              value={String(sel?.fill ?? defs.fillColor)}
+              onChange={(e) => {
+                setDefs((d) => ({ ...d, fillColor: e.target.value }));
+                if (sel) {
+                  touch();
+                  patch(sel.id, { fill: e.target.value });
+                }
+              }}
+            />
+          )}
+        </label>
+      )}
+      {hasOpacity && (
+        <label className="ctl">
+          <span>Opacity</span>
+          <input type="range" aria-label="Opacity" min={0.1} max={1} step={0.05} value={num(val("opacity"), 1)} onChange={(e) => set("opacity", Number(e.target.value))} />
+        </label>
+      )}
+      {type === "image" && (
+        <button onClick={sel ? onReplaceImage : onPickImage}>{sel ? "Replace picture…" : image ? "Change picture…" : "Choose picture…"}</button>
+      )}
+      {sel?.type === "note" && (
+        <input ref={text} className="ctltext" aria-label="Note text" placeholder="Type the note…" value={String(sel.text ?? "")} onChange={(e) => { touch(); patch(sel.id, { text: e.target.value }); }} />
+      )}
+      {sel?.type === "link" && (
+        <input
+          ref={text}
+          className="ctltext"
+          aria-label="Link target"
+          placeholder="https://… or a page number"
+          value={sel.uri ? String(sel.uri) : sel.target_page ? String(sel.target_page) : ""}
+          onChange={(e) => {
+            touch();
+            const t = e.target.value.trim();
+            patch(sel.id, /^\d+$/.test(t) ? { target_page: Number(t), uri: undefined } : { uri: t, target_page: undefined });
+          }}
+        />
+      )}
+      {sel?.type === "redact" && <span className="ctxhint">The content underneath is deleted from the file when you save.</span>}
+      {sel?.type === "erase" && <span className="ctxhint">The content underneath is removed when you save.</span>}
+      <span className="spacer" />
+      {sel && (
+        <>
+          <button onClick={onDuplicate} title="Duplicate (Ctrl+D)">
+            <Copy size={15} strokeWidth={1.5} aria-hidden /> Duplicate
+          </button>
+          <button className="danger" onClick={onDelete} title="Delete (Del)">
+            <Trash2 size={15} strokeWidth={1.5} aria-hidden /> Delete
+          </button>
+        </>
+      )}
     </div>
   );
 }
+
+const ALLLABEL: Record<Tool, string> = {
+  select: "Select", text: "Text", stamp: "Stamp", image: "Image", note: "Note", link: "Link", highlight: "Highlight", underline: "Underline", strike: "Strike",
+  rect: "Box", ellipse: "Oval", line: "Line", arrow: "Arrow", pen: "Pen", erase: "Erase", redact: "Redact",
+};
+

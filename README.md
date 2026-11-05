@@ -26,7 +26,7 @@ officev2 puts the tools people normally scatter across a dozen websites and apps
 
 | Tool | What you can do |
 |---|---|
-| **PDF editor** | Add text (any installed font, Turkish letters included), stamps (APPROVED, DRAFT, ...), images and signatures. Highlight, underline, strike through. Draw boxes, ovals, lines, arrows and freehand. Leave notes, add links. Erase or permanently black out content. Select, drag, edit and delete any change. Undo and redo. Page thumbnails mark the pages you changed. |
+| **PDF editor** | Add text (any installed font, Turkish letters included), stamps (APPROVED, DRAFT, ...), images and signatures. Highlight, underline, strike through. Draw boxes, ovals, lines, arrows and freehand. Leave notes, add links. Erase or permanently black out content. Everything you place is a live object: click it to select, drag to move, pull the handles to resize or rotate, double-click text to retype it in place. The options of the selected item (or of the tool in use) sit in one bar above the page. Pages scroll one under another; thumbnails mark the pages you changed. Undo and redo, duplicate, copy and paste, arrow-key nudging. |
 | **Organize pages** | Every page is a tile: drag to reorder, rotate, duplicate, delete. A plain-language list says exactly what will change. |
 | **Merge, Extract pages** | Merge with a page-by-page result map; pick pages from a thumbnail grid or type a range. |
 | **Add and split** | Insert blank pages or pages from another PDF; split every N pages, before given pages, or at bookmarks. |
@@ -43,7 +43,7 @@ officev2 puts the tools people normally scatter across a dozen websites and apps
 
 | Tool | What you can do |
 |---|---|
-| **Photo editor** | Crop with aspect ratios, rotate, straighten, flip, resize. Exposure, brightness, contrast, highlights, shadows, warmth, tint, saturation, vibrance, hue, sharpness, auto-enhance. 17 filters with live thumbnails, vignette, film grain. Blur, pixelate or tilt-shift **a chosen area** (hide faces or number plates) or blur everything except the subject. Text with outline, shadow and label box; shapes, arrows, pen and marker; logo overlay; border and rounded corners; remove background. Every change is a step you can remove. Presets, hold-to-compare, undo and redo. |
+| **Photo editor** | Crop with aspect ratios, rotate, straighten, flip, resize. Exposure, brightness, contrast, highlights, shadows, warmth, tint, saturation, vibrance, hue, sharpness, auto-enhance. 17 filters with live thumbnails, vignette, film grain. Blur, pixelate or tilt-shift **a chosen area** (hide faces or number plates) or blur everything except the subject. Text with outline, shadow and label box; shapes, arrows, pen and marker; logo overlay; border and rounded corners; remove background. Text, shapes, logos and blur areas are live objects on the photo: click to select, drag, resize with handles, rotate, double-click text to retype. Whole-photo tools (crop, light, filters, border, size) sit in a short list of sections on the right. Every change is a step you can remove. Presets, hold-to-compare, undo and redo. |
 | **Batch** | Apply the same edits to a whole folder; convert, compress and strip metadata in bulk. |
 | **Video, Remove background, Upscale** | ffmpeg conversion, background removal, AI upscaling. |
 
@@ -106,9 +106,9 @@ $env:LOCALFLOW_DEV_TOKEN = "dev"
 ## Tests
 
 ```powershell
-cd backend;  .\venv\Scripts\python.exe -m pytest -m "not network"   # engine: 137 tests (140 with model downloads)
+cd backend;  .\venv\Scripts\python.exe -m pytest -m "not network"   # engine: 138 tests (141 with model downloads)
 cd frontend; npm test                                              # logic: 51 tests
-cd frontend; npm run test:e2e                                      # real engine + real UI in Edge: 52 checks
+cd frontend; npm run test:e2e                                      # real engine + real UI in Edge: 65 checks
 cd frontend\src-tauri; cargo test --lib                            # clipboard store: 9 tests
 ```
 

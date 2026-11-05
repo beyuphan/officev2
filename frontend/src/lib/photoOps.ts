@@ -47,17 +47,25 @@ export function isNeutral(op: Op): boolean {
   }
 }
 
-/** The list to send to the engine: ordered by stage (stable) and without the ids. */
-export function pipeline(items: Item[]): Op[] {
+/** Items in the order the engine applies them (by stage, then as made). */
+export function ordered(items: Item[]): Item[] {
   return items
     .map((it, i) => ({ it, i }))
     .sort((a, b) => (STAGE[a.it.type] ?? 9) - (STAGE[b.it.type] ?? 9) || a.i - b.i)
-    .map(({ it }) => {
-      const { id: _id, ...op } = it;
-      void _id;
-      return op as Op;
-    });
+    .map(({ it }) => it);
 }
+
+/** The list to send to the engine: ordered by stage (stable) and without the ids. */
+export function pipeline(items: Item[]): Op[] {
+  return ordered(items).map((it) => {
+    const { id: _id, ...op } = it;
+    void _id;
+    return op as Op;
+  });
+}
+
+/** Things placed on the photo that can be clicked, moved and resized. */
+export const isObject = (it: Op): boolean => it.type === "text" || it.type === "shape" || it.type === "overlay" || (it.type === "blur" && Boolean(it.area));
 
 /** Add an op, replacing the previous one when it is a single-instance setting; neutral settings remove it. */
 export function put(items: Item[], op: Op, nextId: () => number): Item[] {

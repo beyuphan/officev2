@@ -7,6 +7,7 @@ length is multiplied by `scale`, the preview-to-original ratio.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 import math
 import os
 from collections import OrderedDict
@@ -463,6 +464,17 @@ def _font(op: dict, size_px: float) -> ImageFont.FreeTypeFont | ImageFont.ImageF
         return ImageFont.load_default(max(4, int(size_px)))
 
 
+# where text and pictures landed, reported by the preview so the editor can frame them exactly
+_BOXES: ContextVar[list | None] = ContextVar("photo_boxes", default=None)
+_CUR: ContextVar[int] = ContextVar("photo_cur_op", default=-1)
+
+
+def _note_box(base: Image.Image, left: int, top: int, w: int, h: int) -> None:
+    sink = _BOXES.get()
+    if sink is not None:
+        sink.append({"index": _CUR.get(), "rect": [left / base.width, top / base.height, (left + w) / base.width, (top + h) / base.height]})
+
+
 def _composite_tile(base: Image.Image, tile: Image.Image, left: int, top: int) -> Image.Image:
     """Alpha-composite `tile` onto `base` at (left, top); parts outside the image are clipped."""
     out = base.convert("RGBA")
@@ -503,7 +515,9 @@ def _op_text(img: Image.Image, op: dict, scale: float) -> Image.Image:
     if rot:
         tile = tile.rotate(-rot, resample=Image.BICUBIC, expand=True)
     cx, cy = _num(op, "x", 0.5, -1, 2) * img.width, _num(op, "y", 0.5, -1, 2) * img.height
-    return _composite_tile(img, tile, int(round(cx - tile.width / 2)), int(round(cy - tile.height / 2)))
+    left, top = int(round(cx - tile.width / 2)), int(round(cy - tile.height / 2))
+    _note_box(img, left, top, tile.width, tile.height)
+    return _composite_tile(img, tile, left, top)
 
 
 def _supersampled(img: Image.Image, draw: Callable[[ImageDraw.ImageDraw, float], None]) -> Image.Image:
@@ -575,7 +589,9 @@ def _op_overlay(img: Image.Image, op: dict, scale: float) -> Image.Image:
     if rot:
         logo = logo.rotate(-rot, resample=Image.BICUBIC, expand=True)
     cx, cy = _num(op, "x", 0.85, -1, 2) * img.width, _num(op, "y", 0.9, -1, 2) * img.height
-    return _composite_tile(img, logo, int(round(cx - logo.width / 2)), int(round(cy - logo.height / 2)))
+    left, top = int(round(cx - logo.width / 2)), int(round(cy - logo.height / 2))
+    _note_box(img, left, top, logo.width, logo.height)
+    return _composite_tile(img, logo, left, top)
 
 
 def _op_rounded(img: Image.Image, op: dict, scale: float) -> Image.Image:
@@ -635,6 +651,7 @@ def apply_ops(img: Image.Image, ops: list[dict], scale: float = 1.0, data_dir: s
     out = img.convert("RGBA")
     for i, op in enumerate(ops):
         t = op.get("type")
+        _CUR.set(i)
         try:
             if t == "remove_background":
                 out = _op_remove_background(out, op, scale, data_dir)
@@ -713,9 +730,15 @@ def photo_info(path: str) -> dict:
 def render_preview(path: str, ops: list[dict], max_side: int = 1400, data_dir: str | None = None) -> dict:
     base, original = _base_for_preview(path, max_side)
     scale = base.width / original[0]
-    out = apply_ops(base, ops, scale, data_dir)
+    sink: list = []
+    token = _BOXES.set(sink)
+    try:
+        out = apply_ops(base, ops, scale, data_dir)
+    finally:
+        _BOXES.reset(token)
     image, mime = _encode(out)
     return {
+        "boxes": sink,
         "image": image,
         "mime": mime,
         "width": out.width,

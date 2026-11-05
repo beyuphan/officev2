@@ -361,3 +361,19 @@ def test_batch_applies_the_same_edits_to_every_photo(client, tmp_path):
     assert job["state"] == "done" and job["result"]["count"] == 2 and len(job["result"]["skipped"]) == 1
     sizes = sorted(Image.open(f).size for f in (tmp_path / "out").iterdir())
     assert sizes == [(100, 200), (200, 300)]
+
+
+def test_preview_reports_where_text_and_pictures_landed(tmp_path):
+
+    src = tmp_path / "p.png"
+    Image.new("RGB", (600, 400), (30, 60, 90)).save(src)
+    edits = [
+        {"type": "adjust", "brightness": 10},
+        {"type": "text", "text": "Hello", "size": 60, "x": 0.5, "y": 0.25},
+    ]
+    res = P.render_preview(str(src), edits, 600)
+    (box,) = res["boxes"]
+    assert box["index"] == 1
+    x0, y0, x1, y1 = box["rect"]
+    assert abs((x0 + x1) / 2 - 0.5) < 0.01 and abs((y0 + y1) / 2 - 0.25) < 0.01
+    assert 0.1 < x1 - x0 < 0.9 and 0.05 < y1 - y0 < 0.5

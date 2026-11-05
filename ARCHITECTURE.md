@@ -167,6 +167,7 @@ Windows is the primary target. OS-specific code (clipboard formats, screen captu
 - Geometry is normalized (0..1 of the image at that step) and every pixel length is in pixels of the original image. Each pixel length is multiplied by `scale`, the ratio of the working image to the original, so a small preview and the full-resolution export show the same picture. A test measures the difference between the two.
 - The UI sorts edits by stage (geometry, privacy blur, tone, filter, finish, drawing, frame) before sending them, so a tone change never recolors text.
 - Previews work on a cached, downscaled copy of the photo; export and batch run as jobs on the full file.
+- Text, shapes, logos and blur areas are objects in the edit list. The preview also reports where text and pictures landed (`boxes`), so the editor can draw selection frames exactly on them; the UI hides a text while it is being retyped in place.
 - `result_size` is computed without rendering, and a test checks it against real exports for every geometry edit (including Pillow's exact rounding for arbitrary rotation angles).
 
 ## 16. PDF editor engine
@@ -175,7 +176,7 @@ Windows is the primary target. OS-specific code (clipboard formats, screen captu
 
 - All coordinates are in the page **as displayed** (points, origin top-left, after the page rotation). The engine converts to PDF space, so everything is correct on rotated pages; tests cover 0, 90, 180 and 270 degrees.
 - Erase and redact run first because they delete content; everything else is added afterwards.
-- The preview endpoint applies the same code to an in-memory copy of one page and returns where each edit sits, which the UI uses for selecting and moving edits.
+- The editor draws every placed item itself (text, shapes, images, notes) as live objects in page points, so selecting, moving, resizing and retyping need no round trip. The saved file is produced by the engine from the same list of edits.
 
 ### Text that stays searchable
 

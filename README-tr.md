@@ -26,7 +26,7 @@ officev2, insanların normalde bir düzine web sitesi ve uygulamaya dağıttığ
 
 | Araç | Yapabilecekleriniz |
 |---|---|
-| **PDF düzenleyici** | Yazı ekleme (yüklü her yazı tipi, Türkçe harfler dahil), damgalar (ONAYLANDI, TASLAK vb.), görsel ve imza ekleme. Vurgulama, altını çizme, üstünü çizme. Kutu, oval, çizgi, ok ve serbest çizim. Not bırakma, bağlantı ekleme. İçeriği silme veya kalıcı olarak karartma. Yaptığınız her değişikliği seçme, sürükleme, düzenleme ve silme. Geri al / yinele. Sayfa küçük resimleri, değiştirdiğiniz sayfaları işaretler. |
+| **PDF düzenleyici** | Yazı ekleme (yüklü her yazı tipi, Türkçe harfler dahil), damgalar (ONAYLANDI, TASLAK vb.), görsel ve imza ekleme. Vurgulama, altını çizme, üstünü çizme. Kutu, oval, çizgi, ok ve serbest çizim. Not bırakma, bağlantı ekleme. İçeriği silme veya kalıcı olarak karartma. Yerleştirdiğiniz her şey canlı bir nesnedir: tıklayarak seçin, sürükleyerek taşıyın, tutamaçlarla boyutlandırın veya döndürün, yazıya çift tıklayarak yerinde düzenleyin. Seçili nesnenin (veya kullandığınız aracın) ayarları sayfanın üstündeki tek bir çubukta durur. Sayfalar alt alta kayar; küçük resimler değiştirdiğiniz sayfaları işaretler. Geri al / yinele, çoğaltma, kopyala-yapıştır, ok tuşlarıyla kaydırma. |
 | **Sayfaları düzenle** | Her sayfa bir karo: sürükleyerek sırala, döndür, çoğalt, sil. Sade dille yazılmış bir liste tam olarak neyin değişeceğini söyler. |
 | **Birleştir, Sayfa ayıkla** | Sayfa sayfa sonuç haritasıyla birleştirme; küçük resim ızgarasından sayfa seçme veya aralık yazma. |
 | **Ekle ve böl** | Boş sayfa veya başka bir PDF'ten sayfa ekleme; her N sayfada, belirli sayfalardan önce veya yer imlerinde bölme. |
@@ -43,7 +43,7 @@ officev2, insanların normalde bir düzine web sitesi ve uygulamaya dağıttığ
 
 | Araç | Yapabilecekleriniz |
 |---|---|
-| **Fotoğraf düzenleyici** | Oranlı kırpma, döndürme, düzleştirme, çevirme, yeniden boyutlandırma. Pozlama, parlaklık, kontrast, parlak/koyu tonlar, sıcaklık, renk tonu, doygunluk, canlılık, renk dönüşü, keskinlik, otomatik iyileştirme. Canlı küçük resimli 17 filtre, vinyet, film greni. **Seçtiğiniz bir alanı** bulanıklaştırma, mozaikleme veya tilt-shift (yüz ya da plaka gizleme) ya da konu dışındaki her şeyi bulanıklaştırma. Çerçeveli/gölgeli yazı, şekil, ok, kalem ve fosforlu kalem, logo ekleme, kenarlık, yuvarlak köşe, arka plan silme. Her değişiklik kaldırılabilen bir adımdır. Hazır ayarlar, basılı tutup karşılaştırma, geri al / yinele. |
+| **Fotoğraf düzenleyici** | Oranlı kırpma, döndürme, düzleştirme, çevirme, yeniden boyutlandırma. Pozlama, parlaklık, kontrast, parlak/koyu tonlar, sıcaklık, renk tonu, doygunluk, canlılık, renk dönüşü, keskinlik, otomatik iyileştirme. Canlı küçük resimli 17 filtre, vinyet, film greni. **Seçtiğiniz bir alanı** bulanıklaştırma, mozaikleme veya tilt-shift (yüz ya da plaka gizleme) ya da konu dışındaki her şeyi bulanıklaştırma. Çerçeveli/gölgeli yazı, şekil, ok, kalem ve fosforlu kalem, logo ekleme, kenarlık, yuvarlak köşe, arka plan silme. Yazı, şekil, logo ve bulanık alanlar fotoğraf üzerinde canlı nesnelerdir: tıklayıp seçin, sürükleyin, tutamaçlarla boyutlandırın, döndürün, yazıya çift tıklayıp düzenleyin. Tüm fotoğrafa uygulanan araçlar (kırpma, ışık, filtre, kenarlık, boyut) sağda kısa bir bölüm listesindedir. Her değişiklik kaldırılabilen bir adımdır. Hazır ayarlar, basılı tutup karşılaştırma, geri al / yinele. |
 | **Toplu işlem** | Aynı düzenlemeleri bir klasördeki tüm fotoğraflara uygulama; toplu dönüştürme, sıkıştırma ve metadata silme. |
 | **Video, Arka plan silme, Büyütme** | ffmpeg dönüştürme, arka plan silme, yapay zeka ile büyütme. |
 
@@ -106,9 +106,9 @@ $env:LOCALFLOW_DEV_TOKEN = "dev"
 ## Testler
 
 ```powershell
-cd backend;  .\venv\Scripts\python.exe -m pytest -m "not network"   # motor: 137 test (model indirenlerle 140)
+cd backend;  .\venv\Scripts\python.exe -m pytest -m "not network"   # motor: 138 test (model indirenlerle 141)
 cd frontend; npm test                                              # mantık: 51 test
-cd frontend; npm run test:e2e                                      # gerçek motor + gerçek arayüz (Edge): 52 kontrol
+cd frontend; npm run test:e2e                                      # gerçek motor + gerçek arayüz (Edge): 65 kontrol
 cd frontend\src-tauri; cargo test --lib                            # pano deposu: 9 test
 ```
 

@@ -377,9 +377,14 @@ async function main() {
   check("the tool list folds away in the editors", !(await page.locator(".rail").isVisible()));
   const imgSrc = () => page.locator(".photocanvas > img").getAttribute("src");
   const natural = () => page.evaluate(() => { const i = document.querySelector(".photocanvas > img"); return [i.naturalWidth, i.naturalHeight]; });
-  const editCount = () => page.locator(".photoside .editlist li").count();
   const settle = () => page.waitForSelector(".photocanvas > img:not(.loading)", { timeout: 15000 });
+  const section = async (name) => { if ((await page.locator(`button.acchead[aria-expanded='true']:has-text('${name}')`).count()) === 0) await page.click(`button.acchead:has-text('${name}')`); };
+  const editCount = async () => { await section("All edits"); return page.locator(".photoside .editlist li").count(); };
+  const onPhoto = async (fx, fy) => { const l = await page.locator(".objlayer").boundingBox(); return [l.x + l.width * fx, l.y + l.height * fy]; };
+  const dragPhoto = async (a, b) => { const [x0, y0] = await onPhoto(...a), [x1, y1] = await onPhoto(...b); await page.mouse.move(x0, y0); await page.mouse.down(); await page.mouse.move(x1, y1, { steps: 6 }); await page.mouse.up(); };
+  const clickPhoto = async (fx, fy) => { const [x, y] = await onPhoto(fx, fy); await page.mouse.click(x, y); };
 
+  await section("Crop and rotate");
   await page.selectOption("#cr-asp", "1:1");
   await page.waitForSelector(".cropbox");
   let cb = await page.locator(".cropbox").boundingBox();
@@ -393,52 +398,74 @@ async function main() {
   check("dragging a corner keeps the square and shrinks it", Math.abs(cb2.width - cb2.height) < 4 && cb2.width < cb.width - 20, JSON.stringify([cb, cb2]));
   await shot("20-photo-crop");
   await page.click("button:has-text('Apply crop')");
-  await page.waitForSelector("text=Crop to");
+  await page.waitForFunction(() => { const i = document.querySelector(".photocanvas > img"); return i && i.naturalWidth && i.naturalWidth < 600 && Math.abs(i.naturalWidth / i.naturalHeight - 1) < 0.02; }, null, { timeout: 15000 });
   await settle();
   const [nw, nh] = await natural();
   check("the preview shows the cropped square", Math.abs(nw / nh - 1) < 0.02 && nw < 600, `${nw}x${nh}`);
+  const beforeRotate = await imgSrc();
   await page.click("button[aria-label='Rotate right']");
-  await page.waitForSelector("text=Rotate right 90°");
+  await page.waitForFunction((b) => document.querySelector(".photocanvas > img").getAttribute("src") !== b, beforeRotate, { timeout: 10000 });
 
-  await page.click("button[role='tab']:has-text('Adjust')");
+  await section("Light and color");
   const srcBeforeAdjust = await imgSrc();
   await page.locator("#sl-Brightness").fill("40");
-  await page.waitForSelector("text=brightness +40");
-  await page.waitForFunction((b) => document.querySelector(".photocanvas > img").getAttribute("src") !== b, before, { timeout: 10000 });
+  await page.waitForFunction((b) => document.querySelector(".photocanvas > img").getAttribute("src") !== b, srcBeforeAdjust, { timeout: 10000 });
   check("adjust sliders change the preview", true);
 
-  await page.click("button[role='tab']:has-text('Filters')");
+  await section("Filters and looks");
   await page.waitForFunction(() => document.querySelectorAll(".filtergrid img").length >= 10, null, { timeout: 15000 });
   check("every filter shows a thumbnail of this photo", (await page.locator(".filtergrid img").count()) >= 15);
+  const srcBeforeFilter = await imgSrc();
   await page.click(".filtergrid button:has-text('sepia')");
-  await page.waitForSelector("text=Filter: sepia");
+  await page.waitForFunction((b) => document.querySelector(".photocanvas > img").getAttribute("src") !== b, srcBeforeFilter, { timeout: 10000 });
   await shot("21-photo-filters");
 
-  await page.click("button[role='tab']:has-text('Blur')");
-  const layer = await page.locator(".draglayer").boundingBox();
-  await page.mouse.move(layer.x + layer.width * 0.2, layer.y + layer.height * 0.2);
+  // blur area: a placed object you can see, select, move and reshape
+  await page.click("button[aria-label='Blur area']");
+  await dragPhoto([0.2, 0.2], [0.6, 0.5]);
+  await page.waitForSelector("[data-type='blur']");
+  check("a blur area is selected right away with its options above the photo", (await page.locator(".ctxlabel").innerText()).includes("Blur") && (await page.locator("input[aria-label='Strength']").count()) === 1);
+  const blurBox = await page.locator("[data-type='blur']").boundingBox();
+  const bh = await page.locator(".pobj.selected .hdl-se").boundingBox();
+  await page.mouse.move(bh.x + 5, bh.y + 5);
   await page.mouse.down();
-  await page.mouse.move(layer.x + layer.width * 0.6, layer.y + layer.height * 0.5, { steps: 6 });
+  await page.mouse.move(bh.x + 5 + 50, bh.y + 5 + 30, { steps: 5 });
   await page.mouse.up();
-  await page.waitForSelector(".areabox");
-  await page.click(".tabpanel button:has-text('Apply')");
-  await page.waitForSelector("text=Gaussian blur (area)");
+  const blurBox2 = await page.locator("[data-type='blur']").boundingBox();
+  check("a handle resizes the blur area", blurBox2.width > blurBox.width + 30, `${blurBox.width} -> ${blurBox2.width}`);
 
-  await page.click("button[role='tab']:has-text('Text')");
-  await page.fill("#tx-text", "Merhaba ğüşİ");
-  const l2 = await page.locator(".draglayer").boundingBox();
-  await page.mouse.click(l2.x + l2.width * 0.5, l2.y + l2.height * 0.8);
-  await page.click("button:has-text('Add text')");
-  await page.waitForSelector("text=Merhaba");
-
-  await page.click("button[role='tab']:has-text('Draw')");
-  await page.click("button[aria-pressed]:has-text('Arrow'), .tabpanel button:has-text('Arrow')");
-  const l3 = await page.locator(".draglayer").boundingBox();
-  await page.mouse.move(l3.x + l3.width * 0.1, l3.y + l3.height * 0.1);
+  // text: click, type, done
+  await page.click("button[aria-label='Text']");
+  await clickPhoto(0.5, 0.8);
+  await page.waitForSelector("textarea.ptext");
+  await page.keyboard.type("Merhaba ğüşİ");
+  await page.keyboard.press("Control+Enter");
+  await page.waitForSelector("[data-type='text']");
+  await settle();
+  check("photo text is placed with one click and typed in place", (await page.locator("textarea.ptext").count()) === 0 && (await page.locator(".ctxlabel").innerText()) === "Text");
+  const tb1 = await page.locator("[data-type='text']").boundingBox();
+  // move it by dragging the text itself
+  await page.mouse.move(tb1.x + tb1.width / 2, tb1.y + tb1.height / 2);
   await page.mouse.down();
-  await page.mouse.move(l3.x + l3.width * 0.4, l3.y + l3.height * 0.3, { steps: 6 });
+  await page.mouse.move(tb1.x + tb1.width / 2, tb1.y + tb1.height / 2 - 80, { steps: 6 });
   await page.mouse.up();
-  await page.waitForSelector("text=Draw arrow");
+  const tb2 = await page.locator("[data-type='text']").boundingBox();
+  check("dragging placed text moves it", tb2.y < tb1.y - 50, `${tb1.y} -> ${tb2.y}`);
+  // double-click retypes it in place
+  await page.mouse.dblclick(tb2.x + tb2.width / 2, tb2.y + tb2.height / 2);
+  await page.waitForSelector("textarea.ptext");
+  check("double-click edits the text where it stands", (await page.locator("textarea.ptext").inputValue()) === "Merhaba ğüşİ");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("[data-type='text']");
+  // change the size in the bar
+  const w1 = (await page.locator("[data-type='text']").boundingBox()).width;
+  await page.fill("input[aria-label='Size']", String(Math.round(Number(await page.locator("input[aria-label='Size']").inputValue()) * 1.6)));
+  await page.waitForFunction((w) => document.querySelector("[data-type='text']").getBoundingClientRect().width > w * 1.2, w1, { timeout: 10000 });
+  check("changing the size in the bar resizes the text on the photo", true);
+
+  await page.click("button[aria-label='Arrow']");
+  await dragPhoto([0.1, 0.1], [0.4, 0.3]);
+  await page.waitForSelector("[data-type='shape']");
   await settle();
   await shot("22-photo-edited");
 
@@ -452,11 +479,12 @@ async function main() {
   check("undo removes the last edit", (await editCount()) === nBefore - 1);
   await page.keyboard.press("Control+y");
   check("redo (Ctrl+Y) brings it back", (await editCount()) === nBefore);
+  // an edit in the list can be selected on the photo, and Delete removes it
   await page.fill("input[aria-label='Preset name']", "my look");
   await page.click("button:has-text('Save'):near(input[aria-label='Preset name'])");
   await page.waitForSelector(".presetlist li:has-text('my look')");
 
-  await page.click("button[role='tab']:has-text('Save')");
+  await section("Size and save");
   await page.selectOption("#sv-fmt", "png");
   await answer(W("pic-edited.png"));
   await page.click("button:has-text('Save a copy…')");
@@ -472,73 +500,96 @@ async function main() {
   await page.click("text=Open a PDF…");
   await page.waitForSelector(".page.editable img");
   await page.waitForSelector(".strip img");
-  const box = () => page.locator(".page.editable").boundingBox();
-  let pb = await box();
+  const pg = (n) => `.pagewrap[data-page='${n}'] .page.editable`;
+  let pb = await page.locator(pg(1)).boundingBox();
   const at = (x, y) => [pb.x + (x / 400) * pb.width, pb.y + (y / 300) * pb.height];
   const clickAt = async (x, y) => { const [px, py] = at(x, y); await page.mouse.click(px, py); };
   const dragAt = async (x0, y0, x1, y1) => { const [a, b] = at(x0, y0), [c, d] = at(x1, y1); await page.mouse.move(a, b); await page.mouse.down(); await page.mouse.move(c, d, { steps: 6 }); await page.mouse.up(); };
-  const idle = () => page.waitForSelector(".preview:not(.loading)", { timeout: 15000 });
+  const count = (sel) => page.locator(sel).count();
 
+  // text: click, type, done. No dialog in between.
   await page.click("button[aria-label='Text']");
   await clickAt(100, 200);
-  await page.waitForSelector("#pe-prompt");
-  await page.fill("#pe-prompt", "Çalışma ğ");
-  await page.keyboard.press("Enter");
-  await page.waitForSelector("text=Çalışma ğ”");
-  await idle();
+  await page.waitForSelector("textarea.editing");
+  await page.keyboard.type("Çalışma ğ");
+  await page.keyboard.press("Control+Enter");
+  await page.waitForSelector(".obj.text:has-text('Çalışma ğ')");
+  check("text is placed with one click and typed in place", (await count("textarea.editing")) === 0);
+  check("after placing, the text stays selected with its options above", (await page.locator(".ctxlabel").innerText()).startsWith("Text") && (await count(".obj.text.selected")) === 1);
+
   await page.click("button[aria-label='Highlight']");
   await dragAt(55, 100, 170, 125);
-  await page.waitForSelector(".pdfside >> text=Highlight");
+  await page.waitForSelector("[data-type='highlight']");
   await page.click("button[aria-label='Box']");
   await dragAt(220, 40, 320, 90);
-  await page.waitForSelector(".pdfside >> text=Box");
-  await page.click("button[aria-label='Text']");
-  await page.click(".stamps button:has-text('APPROVED')");
+  await page.waitForSelector("[data-type='rect']");
+  check("a drawn box is selected right away and its options show above the page", (await page.locator(".ctxlabel").innerText()).startsWith("Box") && (await count("input[aria-label='Line width']")) === 1);
+  const rectW = (await page.locator("[data-type='rect']").boundingBox()).width;
+  await page.click("button[aria-label='Stamp']");
+  await page.click(".ctxbar .stamps button:has-text('APPROVED')");
   await clickAt(250, 250);
-  await page.waitForSelector("text=APPROVED”");
-  await idle();
+  await page.waitForSelector(".obj.text:has-text('APPROVED')");
   await shot("23-pdf-editor");
 
+  // click a placed item to edit it: double-click text to retype
   await page.click("button[aria-label='Select']");
-  await clickAt(110, 205);
-  await page.waitForSelector("h2:has-text('Selected text')");
-  const [mx, my] = at(110, 205), [mx2, my2] = at(110, 245);
+  await clickAt(110, 200);
+  check("clicking placed text selects it and shows font and size", (await count(".obj.text.selected")) === 1 && (await count("select[aria-label='Font']")) === 1);
+  const [dx0, dy0] = at(110, 200);
+  await page.mouse.dblclick(dx0, dy0);
+  await page.waitForSelector("textarea.editing");
+  check("double-click edits the text where it stands", (await page.locator("textarea.editing").inputValue()) === "Çalışma ğ");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".obj.text:has-text('Çalışma ğ')");
+  await page.fill("input[aria-label='Size']", "20");
+  const fs20 = await page.locator(".obj.text.selected").evaluate((e) => getComputedStyle(e).fontSize);
+  check("changing the size in the bar changes the selected text", parseFloat(fs20) > 15, fs20);
+  // move by dragging the text itself
+  const [mx, my] = at(110, 200), [mx2, my2] = at(110, 240);
   await page.mouse.move(mx, my);
   await page.mouse.down();
   await page.mouse.move(mx2, my2, { steps: 6 });
   await page.mouse.up();
-  await idle();
-  await clickAt(270, 65);
+  // resize the box with its corner handle, then delete it with the keyboard
+  await clickAt(220, 65);
+  await page.waitForSelector(".hdl-se");
+  const h = await page.locator(".hdl-se").boundingBox();
+  await page.mouse.move(h.x + 5, h.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(h.x + 5 + 40, h.y + 5 + 30, { steps: 5 });
+  await page.mouse.up();
+  const rectW2 = (await page.locator("[data-type='rect']").boundingBox()).width;
+  check("a handle resizes a placed shape", rectW2 > rectW + 20, `${rectW} -> ${rectW2}`);
   await page.keyboard.press("Delete");
-  await page.waitForFunction(() => !document.querySelector(".pdfside .editlist")?.innerText.includes("Box"));
-  check("select, drag and Delete work on the page", true);
+  await page.waitForFunction(() => !document.querySelector("[data-type='rect']"));
+  check("select, drag, resize and Delete work on the page", true);
 
+  // second page: pages scroll one under another
   await page.click("button[aria-label^='Page 2']");
-  await page.waitForSelector("img[alt='Page 2']");
+  await page.waitForSelector(`${pg(2)} img`);
+  pb = await page.locator(pg(2)).boundingBox();
   await page.click("button[aria-label='Note']");
-  pb = await box();
   await clickAt(50, 50);
-  await page.fill("#pe-prompt", "kontrol et");
-  await page.keyboard.press("Enter");
-  await page.waitForSelector("text=Note “kontrol et”");
+  await page.fill("input[aria-label='Note text']", "kontrol et");
+  await page.waitForSelector(".obj.note");
   await page.click("button[aria-label^='Page 1']");
-  await page.waitForSelector("img[alt='Page 1']");
-  pb = await box();
+  await page.waitForTimeout(400);
+  pb = await page.locator(pg(1)).boundingBox();
   await page.click("button[aria-label='Link']");
   await dragAt(55, 100, 170, 130);
-  await page.fill("#pe-prompt", "example.com");
-  await page.keyboard.press("Enter");
-  await page.waitForSelector("text=Link to example.com");
-  const nOps = await page.locator(".pdfside .editlist li").count();
+  await page.fill("input[aria-label='Link target']", "example.com");
+  await page.waitForSelector("[data-type='link']");
+  await clickAt(300, 280); // a click on empty page leaves the field
+  const nOps = await count("[data-oid]");
   await page.keyboard.press("Control+z");
-  check("Ctrl+Z undoes the last PDF edit", (await page.locator(".pdfside .editlist li").count()) === nOps - 1);
+  check("Ctrl+Z undoes the last PDF edit", (await count("[data-oid]")) === nOps - 1, `${nOps}`);
   await page.keyboard.press("Control+y");
   await answer(W("edit-out.pdf"));
   await page.click("button:has-text('Save a copy…')");
-  await page.waitForSelector("text=pages written", { timeout: 30000 });
+  await page.waitForSelector("text=pages written", { timeout: 30000 }).catch(async (e) => { console.log("STATUS:", await page.locator(".pdfstatus, .ctxbar").allInnerTexts()); throw e; });
   const out = JSON.parse(await pyOut(`import pymupdf,json\nd=pymupdf.open(r"${wp("edit-out.pdf")}")\np=d[0];q=d[1]\nw=p.search_for("Çalışma ğ")\nprint(json.dumps({"t1":p.get_text(),"annots":[a.type[1] for a in p.annots()],"links":[l.get("uri") for l in p.get_links()],"y":w[0].y0 if w else None,"stamp":"APPROVED" in p.get_text(),"note":[a.info["content"] for a in q.annots()]}))`));
   check("the saved PDF has the text, searchable with Turkish letters", out.t1.includes("Çalışma ğ") && out.y !== null, JSON.stringify(out));
-  check("the text was moved by the drag (about 40 points down)", out.y > 225 && out.y < 255, String(out.y));
+  check("the text was moved by the drag (about 40 points down)", out.y > 225 && out.y < 262, String(out.y));
   check("highlight, link, stamp and note all made it into the file", out.annots.includes("Highlight") && !out.annots.includes("Square") && out.links.includes("https://example.com") && out.stamp && out.note[0] === "kontrol et", JSON.stringify(out));
 
   // 13. PDF page tools

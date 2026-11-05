@@ -14,11 +14,13 @@ export type Preview = {
   original_width: number;
   original_height: number;
   result_size: [number, number];
+  /** Where text and pictures landed, by position in the edit list: [x0, y0, x1, y1] as fractions of the picture. */
+  boxes?: { index: number; rect: number[] }[];
 };
 
 /** Renders `edits` on the photo; the previous picture stays on screen while the next one is computed. */
-export function usePhotoPreview(file: string | null, edits: object[], delay = 120) {
-  const [state, setState] = useState<{ data: Preview | null; loading: boolean; error: string }>({ data: null, loading: false, error: "" });
+export function usePhotoPreview<T = undefined>(file: string | null, edits: object[], delay = 80, tag?: T) {
+  const [state, setState] = useState<{ data: Preview | null; loading: boolean; error: string; tag?: T }>({ data: null, loading: false, error: "" });
   const seq = useRef(0);
   const key = file ? JSON.stringify([file, edits]) : "";
 
@@ -32,9 +34,9 @@ export function usePhotoPreview(file: string | null, edits: object[], delay = 12
     const t = setTimeout(async () => {
       try {
         const data = await post<Preview>("/photo/preview", { input: file, edits });
-        if (mine === seq.current) setState({ data, loading: false, error: "" });
+        if (mine === seq.current) setState({ data, loading: false, error: "", tag });
       } catch (e) {
-        if (mine === seq.current) setState((s) => ({ data: s.data, loading: false, error: e instanceof Error ? e.message : String(e) }));
+        if (mine === seq.current) setState((s) => ({ data: s.data, loading: false, error: e instanceof Error ? e.message : String(e), tag: s.tag }));
       }
     }, delay);
     return () => clearTimeout(t);
