@@ -56,6 +56,24 @@ officev2, insanların normalde bir düzine web sitesi ve uygulamaya dağıttığ
 - **Araçlar:** Dev Lab (JWT, JSON, Base64, SQL, zaman damgası), PDF'ten kopyalanan metin için temiz yapıştır, karalama defteri.
 - **Her yerde:** komut paleti (`Ctrl+K`), her işlem için geri alma özellikli Etkinlik günlüğü, uzun işler için ilerleme çubuğu ve iptal.
 
+## Düzenleyicileri kullanma
+
+İki düzenleyici de aynı çalışır: **soldan bir araç seçin, sayfada tıklayın veya sürükleyin, sonra yerleştirdiğinize tıklayıp değiştirin.**
+
+| Yapmak istediğiniz | Nasıl |
+|---|---|
+| Yazı eklemek | **Text** aracını seçin, yazının geleceği yere tıklayıp yazın. `Ctrl+Enter` veya `Esc` bitirir. (PDF: yazının satır kırması için önce kutu sürükleyin.) |
+| Yerleştirdiğinizi değiştirmek | Üzerine tıklayın. Ayarları (yazı tipi, boyut, renk, kalınlık, opaklık, bağlantı adresi...) sayfanın üstündeki çubukta çıkar. |
+| Taşıma, boyutlandırma, döndürme | Nesneyi sürükleyin; tutamaçlarını sürükleyin; yuvarlak tutamaçla döndürün (`Shift` 15°'ye yaslar). |
+| Yazıyı yeniden yazmak | Çift tıklayın veya seçip `Enter`'a basın. |
+| Silmek veya kopyalamak | `Delete`, `Ctrl+D` (çoğalt), `Ctrl+C` / `Ctrl+V`. Ok tuşları 1 birim kaydırır (`Shift`: 10). |
+| Geri almak | `Ctrl+Z`, yinelemek `Ctrl+Y`. Bir sürükleme veya kaydırıcı hareketi tek adımdır. |
+| Yüz veya plaka gizlemek (fotoğraf) | **Blur area** aracını seçip üzerine sürükleyin. Bulanıklık veya mozaiği çubuktan seçin. |
+| Metni kalıcı karartmak (PDF) | **Redact** aracını seçip üzerine sürükleyin. Alttaki metin kaydederken silinir. |
+| Araç değiştirmek | `V` seç, `T` yazı, `R` kutu, `O` oval, `A` ok, `P` kalem, `H` vurgu / fosforlu, `I` görsel, `N` not, `L` bağlantı, `E` sil, `X` karart, `B` bulanık alan. `Esc` Seç'e döner. |
+
+PDF sayfaları alt alta kayar, küçük resimler sayfaya götürür. Fotoğraf düzenleyicide tüm fotoğrafa uygulanan araçlar (kırpma, ışık ve renk, filtreler, kenarlık, boyut ve kaydet) sağdaki bölümlerdir.
+
 ## Dosyalarınızı nasıl korur
 
 - **Orijinaller asla değiştirilmez.** Araçlar kopya kaydeder ve var olan bir dosyanın üzerine yazmayı reddeder.

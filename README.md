@@ -56,6 +56,24 @@ officev2 puts the tools people normally scatter across a dozen websites and apps
 - **Tools:** Dev Lab (JWT, JSON, Base64, SQL, timestamps), clean paste for text copied from PDFs, a scratchpad.
 - **Everywhere:** a command palette (`Ctrl+K`), an Activity log with undo for every operation, progress bars and cancel for long jobs.
 
+## Using the editors
+
+Both editors work the same way: **pick a tool on the left, click or drag on the page, then click what you placed to change it.**
+
+| You want to | Do this |
+|---|---|
+| Add text | Pick **Text**, click where it goes and type. `Ctrl+Enter` or `Esc` finishes. (PDF: drag a box first to make the text wrap.) |
+| Change something you placed | Click it. Its options (font, size, color, width, opacity, link address...) appear in the bar above the page. |
+| Move, resize, rotate | Drag the item; drag its handles; drag the round handle to rotate (`Shift` snaps to 15°). |
+| Retype text | Double-click it, or select it and press `Enter`. |
+| Remove or copy | `Delete`, `Ctrl+D` (duplicate), `Ctrl+C` / `Ctrl+V`. Arrow keys nudge by 1 (`Shift`: 10). |
+| Undo | `Ctrl+Z`, redo with `Ctrl+Y`. A drag or a slider move is one step. |
+| Hide a face or plate (photo) | Pick **Blur area** and drag over it. Choose blur or pixelate in the bar. |
+| Black out text for good (PDF) | Pick **Redact** and drag over it. The text underneath is deleted on save. |
+| Switch tools quickly | `V` select, `T` text, `R` box, `O` oval, `A` arrow, `P` pen, `H` highlight / marker, `I` image, `N` note, `L` link, `E` erase, `X` redact, `B` blur area. `Esc` returns to Select. |
+
+PDF pages scroll one under another and the thumbnails jump to a page. In the photo editor, whole-photo tools (crop, light and color, filters, border, size and save) are the sections on the right.
+
 ## How it keeps your files safe
 
 - **Originals are never modified.** Tools save a copy and refuse to overwrite an existing file.
