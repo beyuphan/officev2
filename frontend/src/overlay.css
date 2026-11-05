@@ -1,0 +1,22 @@
+:root { --film: #e8eae3; --panel: #f3f4ef; --ink: #1b1f24; --ink-2: #565c63; --signal: #c23d22; --signal-fill: #d4472b;
+  --sans: Bahnschrift, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; --mono: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--sans); color: var(--ink); }
+html, body, #root { margin: 0; height: 100%; overflow: hidden; background: var(--film); }
+
+.pin { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--film); border: 1px solid var(--ink); box-sizing: border-box; }
+.pin img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
+.pin-hint { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; font-size: 11px; background: var(--ink); color: var(--panel); opacity: 0; pointer-events: none; }
+.pin:hover .pin-hint { opacity: 0.92; }
+
+.snip { position: relative; width: 100vw; height: 100vh; cursor: crosshair; user-select: none; background: #000; }
+.snip > img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.snip .sel { position: absolute; border: 1px solid var(--signal-fill); box-shadow: 0 0 0 100vmax rgb(27 31 36 / 0.5); pointer-events: none; }
+.snip-hint { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 8px 14px; font-size: 14px; }
+.snip-result { position: absolute; left: 50%; bottom: 48px; transform: translateX(-50%); width: min(560px, 90vw); background: var(--panel); border: 1px solid var(--ink); padding: 14px 16px; cursor: default; }
+.snip-result p { margin: 0 0 8px; }
+.snip-result .copied { color: #2b6b47; font-weight: 600; }
+.snip-result .bad { color: #a3231c; }
+.snip-result pre { margin: 0 0 12px; max-height: 30vh; overflow: auto; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; background: #fff; border: 1px solid #c4c8bd; padding: 8px 10px; }
+.snip-result .row { display: flex; gap: 8px; justify-content: flex-end; }
+.snip-result button { font: inherit; padding: 6px 14px; border: 1px solid var(--ink); border-radius: 2px; background: transparent; cursor: pointer; color: inherit; }
+.snip-result button.primary { background: var(--ink); color: var(--panel); }
