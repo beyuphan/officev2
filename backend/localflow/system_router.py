@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from . import extras
 from .history import UndoError
 
 router = APIRouter()
@@ -64,3 +65,15 @@ def put_setting(key: str, body: SettingValue, request: Request):
         (key, json.dumps(body.value)),
     )
     return {key: body.value}
+
+
+@router.get("/extras")
+def list_extras():
+    return {"extras": extras.listing()}
+
+
+@router.post("/extras/{key}/install", status_code=202)
+def install_extra(key: str, request: Request):
+    if key not in extras.EXTRAS:
+        raise HTTPException(status_code=404, detail="unknown add-on")
+    return request.app.state.jobs.submit("extras.install", extras.install, key).to_dict()

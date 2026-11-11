@@ -282,9 +282,86 @@ def _op_link(doc, op) -> list[float]:
     return [r.x0, r.y0, r.x1, r.y1]
 
 
+def _op_field(doc, op) -> list[float]:
+    """A fill-in form field: text box, check box, drop-down list."""
+    page = _page_of(doc, op)
+    r = _rect_op(op)
+    kind = str(op.get("kind", "text"))
+    types = {"text": pymupdf.PDF_WIDGET_TYPE_TEXT, "checkbox": pymupdf.PDF_WIDGET_TYPE_CHECKBOX, "combobox": pymupdf.PDF_WIDGET_TYPE_COMBOBOX}
+    if kind not in types:
+        raise ValueError("a field is a text box, a check box or a drop-down list")
+    existing = {w.field_name for pg in doc for w in (pg.widgets() or [])}
+    name = str(op.get("name") or "").strip() or f"field_{page.number + 1}_{len(existing) + 1}"
+    if name in existing:
+        raise ValueError(f"a field named '{name}' already exists")
+    w = pymupdf.Widget()
+    w.rect = _to_pdf(page, r)
+    w.field_type = types[kind]
+    w.field_name = name
+    w.border_color = (0.2, 0.2, 0.2)
+    w.fill_color = (0.93, 0.96, 1.0)
+    if kind == "text":
+        w.text_fontsize = min(14.0, max(6.0, r.height * 0.6))
+        w.field_value = str(op.get("value", ""))
+    elif kind == "combobox":
+        choices = [str(c).strip() for c in (op.get("choices") or []) if str(c).strip()]
+        if not choices:
+            raise ValueError("give the drop-down list at least one choice")
+        w.choice_values = choices
+        w.field_value = choices[0]
+        w.text_fontsize = min(12.0, max(6.0, r.height * 0.6))
+    page.add_widget(w)
+    return [r.x0, r.y0, r.x1, r.y1]
+
+
+def _op_origimg(doc, op) -> list[float]:
+    """A picture that was already in the PDF: moved or resized (x0..y1 is where it goes) or deleted (`deleted`)."""
+    from .more import _pixmap_of
+
+    page = _page_of(doc, op)
+    xref = int(_f(op, "xref", 0))
+    r = _rect_op(op)
+    pix = None if op.get("deleted") else (op.get("_pix") or _pixmap_of(doc, xref))  # read it before it is taken out
+    page.delete_image(xref)
+    if pix is not None:
+        page.insert_image(_to_pdf(page, r), pixmap=pix, overlay=True, keep_proportion=False)
+    return [r.x0, r.y0, r.x1, r.y1]
+
+
+def _plan_origimg(doc: "pymupdf.Document", ops: list[dict], wanted) -> list[tuple]:
+    """`page.delete_image` blanks the picture everywhere it is used (a logo repeated on every page). Remember the
+    pixels and the other places so they can be put back once the chosen ones are gone."""
+    from .more import _pixmap_of
+
+    mine = [op for op in ops if op.get("type") == "origimg" and wanted(op)]
+    if not mine:
+        return []
+    pix_of: dict[int, "pymupdf.Pixmap"] = {}
+    targets: dict[int, list[tuple[int, pymupdf.Rect]]] = {}
+    for op in mine:
+        xref = int(_f(op, "xref", 0))
+        if xref not in pix_of:
+            pix_of[xref] = _pixmap_of(doc, xref)
+        page = _page_of(doc, op)
+        # without the original position, every use of the picture on that page is meant
+        src = pymupdf.Rect(_f(op, "ox0"), _f(op, "oy0"), _f(op, "ox1"), _f(op, "oy1")) if "ox0" in op else None
+        targets.setdefault(xref, []).append((page.number, _to_pdf(page, src) if src else None))
+        op["_pix"] = pix_of[xref]
+    keep: list[tuple] = []
+    for xref, aimed in targets.items():
+        for pg in doc:
+            if not any(i[0] == xref for i in pg.get_images(full=True)):
+                continue
+            for rect in pg.get_image_rects(xref):
+                if any(n == pg.number and (t is None or (abs(rect.x0 - t.x0) < 2.5 and abs(rect.y0 - t.y0) < 2.5 and abs(rect.x1 - t.x1) < 2.5 and abs(rect.y1 - t.y1) < 2.5)) for n, t in aimed):
+                    continue
+                keep.append((pg.number, pymupdf.Rect(rect), pix_of[xref]))
+    return keep
+
+
 _DRAW = {"text": _op_text, "image": _op_image, "note": _op_note, "link": _op_link, "highlight": _op_markup, "underline": _op_markup,
-         "strike": _op_markup, "squiggly": _op_markup, "rect": _op_shape, "ellipse": _op_shape, "line": _op_shape, "arrow": _op_shape, "ink": _op_shape}
-_REMOVE = ("erase", "redact")  # these delete content, so they run first
+         "strike": _op_markup, "squiggly": _op_markup, "rect": _op_shape, "ellipse": _op_shape, "line": _op_shape, "arrow": _op_shape, "ink": _op_shape, "field": _op_field, "origimg": _op_origimg}
+_REMOVE = ("erase", "redact", "cover")  # these delete content, so they run first
 
 
 def apply_edits(doc: "pymupdf.Document", ops: list[dict], only_page: int | None = None) -> dict[int, list[float]]:
@@ -296,9 +373,26 @@ def apply_edits(doc: "pymupdf.Document", ops: list[dict], only_page: int | None 
     def wanted(op: dict) -> bool:
         return only_page is None or int(op.get("page", 1)) == only_page
 
+    ops = [dict(o) for o in ops]  # edits are annotated below; the caller's list stays as it was
+    # taking text out of the page: only the text goes, so a picture or drawing behind it stays untouched
+    cover_pages: set[int] = set()
+    for i, op in enumerate(ops):
+        if op.get("type") == "cover" and wanted(op):
+            try:
+                page = _page_of(doc, op)
+                r = _rect_op(op)
+                k = r.height * 0.18  # a little off the top and bottom so tightly set neighbouring lines are not eaten
+                page.add_redact_annot(_to_pdf(page, pymupdf.Rect(r.x0 + 0.5, r.y0 + k, max(r.x0 + 1.5, r.x1 - 0.5), max(r.y0 + k + 1, r.y1 - k))), fill=False)
+                cover_pages.add(page.number)
+                boxes[i] = [r.x0, r.y0, r.x1, r.y1]
+            except ValueError as e:
+                raise ValueError(f"edit {i + 1} (cover): {e}")
+    for n in cover_pages:
+        doc[n].apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE, text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+    restore = _plan_origimg(doc, ops, wanted)
     removed_pages: set[int] = set()
     for i, op in enumerate(ops):
-        if op.get("type") in _REMOVE and wanted(op):
+        if op.get("type") in ("erase", "redact") and wanted(op):
             try:
                 page = _page_of(doc, op)
                 r = _rect_op(op)
@@ -320,6 +414,8 @@ def apply_edits(doc: "pymupdf.Document", ops: list[dict], only_page: int | None 
             boxes[i] = _DRAW[t](doc, op)
         except ValueError as e:
             raise ValueError(f"edit {i + 1} ({t}): {e}")
+    for n, rect, pix in restore:  # the copies of a deleted picture that were not meant to go
+        doc[n].insert_image(rect, pixmap=pix, overlay=True, keep_proportion=False)  # on top: behind would hide it under a full-page background
     return boxes
 
 
@@ -336,11 +432,14 @@ def preview_edits(path: str, page: int, ops: list[dict], width: int = 900, passw
         }
 
 
-def edit_pdf(input_path: str, output: str, ops: list[dict], flatten: bool = False) -> dict:
+def edit_pdf(input_path: str, output: str, ops: list[dict], flatten: bool = False, numbers: dict | None = None) -> dict:
+    """Apply the placed items and, when `numbers` is given, page numbers / headers / footers in the same save."""
     with pymupdf.open(input_path) as doc:
         if doc.needs_pass:
             raise ValueError("the document is password protected; unlock it first")
-        boxes = apply_edits(doc, ops)
+        boxes = apply_edits(doc, ops) if ops else {}
+        if numbers:
+            _stamp_doc(doc, Path(input_path).stem, **numbers)
         if flatten:
             doc.bake(annots=True, widgets=False)
         doc.save(output, garbage=3, deflate=True)
@@ -395,17 +494,34 @@ def stamp_pages(
     """Page numbers, headers, footers and Bates-style labels. Tokens: {n} {n:04} {total} {file} {date}."""
     if not items:
         raise ValueError("add at least one header or footer text")
-    path = font_path(font_name, bold)
-    font = pymupdf.Font(fontfile=path) if path else pymupdf.Font("helv")
     name = Path(input_path).stem
     with pymupdf.open(input_path) as doc:
         if doc.needs_pass:
             raise ValueError("the document is password protected; unlock it first")
-        chosen = _select_pages(doc, pages_spec)
-        for k, i in enumerate(chosen):
-            _stamp_page(doc[i], items, start_at + i, doc.page_count + start_at - 1, name, size, margin, _rgb(color), font, opacity, path)
+        chosen = _stamp_doc(doc, name, items, pages_spec, size, margin, color, font_name, bold, start_at, opacity)
         doc.save(output, garbage=3, deflate=True)
-        return {"output": output, "pages": doc.page_count, "stamped": len(chosen)}
+        return {"output": output, "pages": doc.page_count, "stamped": chosen}
+
+
+def _stamp_doc(
+    doc: "pymupdf.Document",
+    name: str,
+    items: list[dict],
+    pages: str | None = None,
+    size: float = 10,
+    margin: float = 28,
+    color: str = "#444444",
+    font: str = "Arial",
+    bold: bool = False,
+    start_at: int = 1,
+    opacity: float = 1.0,
+) -> int:
+    path = font_path(font, bold)
+    fnt = pymupdf.Font(fontfile=path) if path else pymupdf.Font("helv")
+    chosen = _select_pages(doc, pages)
+    for i in chosen:
+        _stamp_page(doc[i], items, start_at + i, doc.page_count + start_at - 1, name, size, margin, _rgb(color), fnt, opacity, path)
+    return len(chosen)
 
 
 def preview_stamp(path: str, page: int, items: list[dict], password: str | None = None, width: int = 700, **kw: Any) -> dict:
@@ -549,9 +665,9 @@ def insert_pages(
 # ---------------------------------------------------------------------------------------------
 
 
-def split_pdf_parts(input_path: str, out_dir: str, every: int = 0, at: list[int] | None = None, by_bookmarks: bool = False) -> dict:
+def split_pdf_parts(input_path: str, out_dir: str, every: int = 0, at: list[int] | None = None, by_bookmarks: bool = False, name: str | None = None) -> dict:
     """Cut a PDF into several files: every N pages, before given pages, or at top-level bookmarks."""
-    stem = Path(input_path).stem
+    stem = name or Path(input_path).stem
     with pymupdf.open(input_path) as src:
         if src.needs_pass:
             raise ValueError("the document is password protected; unlock it first")

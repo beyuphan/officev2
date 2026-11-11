@@ -4,17 +4,14 @@ pymupdf>=1.24
 pydantic>=2.7
 numpy
 pillow
+pillow-heif
+segno
+opencv-python-headless
 send2trash
 watchdog
 psutil
 cryptography
 argon2-cffi
-pdf2docx
-rembg[cpu]
-faster-whisper
-sqlite-vec
-fastembed
-rapidocr-onnxruntime>=1.3
 winrt-runtime; sys_platform == "win32"
 winrt-Windows.Media.Ocr; sys_platform == "win32"
 winrt-Windows.Graphics.Imaging; sys_platform == "win32"

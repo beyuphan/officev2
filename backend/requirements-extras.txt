@@ -1,0 +1,8 @@
+# Optional add-ons. The app installs these on demand from its Add-ons screen; this file is for installing them all by hand.
+rembg[cpu]
+faster-whisper
+fastembed
+sqlite-vec
+rapidocr-onnxruntime
+pdf2docx
+pyhanko

@@ -165,7 +165,7 @@ def test_filters(client, tmp_path):
         assert im.size == (400, 300), name
     assert post(client, "/photo/preview", {"input": str(p), "edits": [{"type": "filter", "name": "nope"}]}).status_code == 422
     thumbs = post(client, "/photo/filter-thumbs", {"input": str(p), "edits": []}, 200).json()["filters"]
-    assert set(thumbs) == set(P.FILTERS)
+    assert set(thumbs) == set(P.FILTERS) | {"__none__"}  # every look, plus the photo as it is for the "None" tile
     assert Image.open(io.BytesIO(base64.b64decode(thumbs["sepia"]))).size in ((150, 112), (150, 113))
 
 

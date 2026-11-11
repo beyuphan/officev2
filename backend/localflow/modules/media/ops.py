@@ -9,7 +9,14 @@ from pathlib import Path
 from ... import jobctl, models
 from ..files.ops import unique_path
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".gif", ".avif", ".ico", ".heic", ".heif"}
+
+try:  # phone photos (HEIC/HEIF); a small optional library, everything else works without it
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+except Exception:  # pragma: no cover - depends on the installation
+    pass
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wmv", ".flv"}
 
 
@@ -41,7 +48,7 @@ def _out_path(out_dir: Path, src: Path, ext: str) -> Path:
 # images
 # ---------------------------------------------------------------------------------------------
 
-FORMATS = {"webp": (".webp", "WEBP"), "jpeg": (".jpg", "JPEG"), "png": (".png", "PNG")}
+FORMATS = {"webp": (".webp", "WEBP"), "jpeg": (".jpg", "JPEG"), "png": (".png", "PNG"), "avif": (".avif", "AVIF"), "ico": (".ico", "ICO")}
 
 
 def convert_images(
@@ -83,8 +90,10 @@ def convert_images(
                     im = im.convert("RGB")
                 dest = _out_path(Path(out_dir), src, ext)
                 params: dict = {}
-                if pil_fmt in ("JPEG", "WEBP"):
+                if pil_fmt in ("JPEG", "WEBP", "AVIF"):
                     params["quality"] = quality
+                if pil_fmt == "ICO" and max(im.size) > 256:
+                    im.thumbnail((256, 256), Image.LANCZOS)  # the ICO format stops at 256 px
                 if pil_fmt == "PNG":
                     params["optimize"] = True
                 if exif:
@@ -178,6 +187,9 @@ def convert_videos(inputs: list[str], out_dir: str, fmt: str = "mp4", crf: int =
 
 def remove_backgrounds(inputs: list[str], out_dir: str, data_dir: str, model: str = "u2netp") -> dict:
     from PIL import Image
+    from ... import extras
+
+    extras.require("background")
     from rembg import new_session, remove
 
     files = collect(inputs, IMAGE_EXTS)
@@ -201,12 +213,23 @@ def remove_backgrounds(inputs: list[str], out_dir: str, data_dir: str, model: st
     return {"outputs": outputs, "created": outputs, "skipped": skipped, "count": len(outputs)}
 
 
-def upscale_images(inputs: list[str], out_dir: str, data_dir: str, scale: int = 4) -> dict:
+def upscale_images(inputs: list[str], out_dir: str, data_dir: str, scale: int = 4, method: str = "basic") -> dict:
     files = collect(inputs, IMAGE_EXTS)
     if not files:
         raise ValueError("no images found")
     if scale not in (2, 3, 4):
         raise ValueError("scale must be 2, 3 or 4")
+    if method == "basic":  # built in: smooth enlargement with a little sharpening, nothing to download
+        from ..photo.layouts import basic_upscale
+
+        outputs = []
+        for i, src in enumerate(files):
+            jobctl.check()
+            jobctl.report(i, len(files), src.name)
+            dest = _out_path(Path(out_dir), src, f"_x{scale}.png")
+            basic_upscale(src, dest, scale)
+            outputs.append(str(dest))
+        return {"outputs": outputs, "created": outputs, "skipped": [], "count": len(outputs)}
     root = models.ensure(data_dir, "realesrgan")
     exe = next(root.rglob("realesrgan-ncnn-vulkan.exe"), None)
     if exe is None:

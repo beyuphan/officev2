@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ...security import resolve_allowed_path
-from . import ops
+from . import convert, more, ops, signing
 
 router = APIRouter(prefix="/pdf", tags=["pdf"])
 
@@ -94,6 +95,8 @@ class RedactRequest(BaseModel):
     terms: list[str] = []
     rects: list[Area] = []  # areas in displayed page coordinates (points), as shown by the preview
     pages: str | None = None
+    patterns: list[Literal["email", "tckn", "iban", "phone", "card"]] = []  # ready-made kinds of sensitive data
+    regex: str | None = Field(default=None, max_length=300)  # your own pattern
 
 
 class ViewRequest(BaseModel):
@@ -113,8 +116,10 @@ class ThumbsRequest(ViewRequest):
 
 
 class SearchRequest(ViewRequest):
-    terms: list[str] = Field(min_length=1)
+    terms: list[str] = []
     pages: str | None = None
+    patterns: list[Literal["email", "tckn", "iban", "phone", "card"]] = []
+    regex: str | None = Field(default=None, max_length=300)
 
 
 class WatermarkPreviewRequest(ViewRequest):
@@ -242,13 +247,18 @@ def organize(body: OrganizeRequest, request: Request):
 
 @router.post("/redact", status_code=202)
 def redact(body: RedactRequest, request: Request):
-    if not any(t.strip() for t in body.terms) and not body.rects:
-        raise HTTPException(status_code=422, detail="list some text or mark some areas to redact")
+    if not any(t.strip() for t in body.terms) and not body.rects and not body.patterns and not body.regex:
+        raise HTTPException(status_code=422, detail="list some text, pick what to look for or mark some areas to redact")
+    if body.regex:
+        try:
+            re.compile(body.regex)
+        except re.error as e:
+            raise HTTPException(status_code=422, detail=f"the pattern is not valid: {e}")
     src = _checked(body.input, request, True)
     output = _checked_output(body.output, request)
     return request.app.state.jobs.submit(
         "pdf.redact", ops.redact_pdf, str(src), str(output), body.terms, body.pages,
-        [r.model_dump() for r in body.rects], creates=[str(output)],
+        [r.model_dump() for r in body.rects], body.patterns, body.regex, creates=[str(output)],
     ).to_dict()
 
 
@@ -315,7 +325,12 @@ def thumbnails(body: ThumbsRequest, request: Request):
 
 @router.post("/search")
 def search(body: SearchRequest, request: Request):
-    return _viewer_call(ops.search_pdf, _view(request, body.input), body.terms, body.pages, body.password)
+    if body.regex:
+        try:
+            re.compile(body.regex)
+        except re.error as e:
+            raise HTTPException(status_code=422, detail=f"the pattern is not valid: {e}")
+    return _viewer_call(ops.search_pdf, _view(request, body.input), body.terms, body.pages, body.password, body.patterns, body.regex)
 
 
 @router.post("/preview-watermark")
@@ -341,8 +356,9 @@ Op = dict[str, Any]
 class EditOpsRequest(BaseModel):
     input: str
     output: str
-    ops: list[Op] = Field(min_length=1, max_length=2000)
+    ops: list[Op] = Field(default=[], max_length=2000)
     flatten: bool = False
+    numbers: "StampSettings | None" = None  # page numbers, headers and footers saved together with the edits
 
 
 class EditPreviewRequest(ViewRequest):
@@ -366,6 +382,9 @@ class StampSettings(BaseModel):
     bold: bool = False
     start_at: int = Field(default=1, ge=0, le=1_000_000)
     opacity: float = Field(default=1.0, ge=0.05, le=1.0)
+
+
+EditOpsRequest.model_rebuild()
 
 
 class StampRequest(StampSettings):
@@ -416,6 +435,7 @@ class SplitPartsRequest(BaseModel):
     every: int = Field(default=0, ge=0, le=100000)
     at: list[int] = []
     by_bookmarks: bool = False
+    name: str | None = Field(default=None, max_length=120)
 
 
 class ExtractImagesRequest(BaseModel):
@@ -496,7 +516,11 @@ def edit_preview(body: EditPreviewRequest, request: Request):
 def edit_save(body: EditOpsRequest, request: Request):
     src = _checked(body.input, request, True)
     out = _checked_output(body.output, request)
-    return _job(request, "pdf.edit", edit.edit_pdf, str(src), str(out), _edit_ops(body.ops, request), body.flatten, creates=[str(out)])
+    numbers = None
+    if body.numbers:
+        n = body.numbers
+        numbers = {"items": [i.model_dump() for i in n.items], "pages": n.pages, "size": n.size, "margin": n.margin, "color": n.color, "font": n.font, "bold": n.bold, "start_at": n.start_at, "opacity": n.opacity}
+    return _job(request, "pdf.edit", edit.edit_pdf, str(src), str(out), _edit_ops(body.ops, request), body.flatten, numbers, creates=[str(out)])
 
 
 @router.post("/stamp-preview")
@@ -543,7 +567,7 @@ def insert(body: InsertRequest, request: Request):
 @router.post("/split-parts", status_code=202)
 def split_parts(body: SplitPartsRequest, request: Request):
     src = _checked(body.input, request, True)
-    return _job(request, "pdf.split_parts", edit.split_pdf_parts, str(src), _dir(body.out_dir, request), body.every, body.at, body.by_bookmarks)
+    return _job(request, "pdf.split_parts", edit.split_pdf_parts, str(src), _dir(body.out_dir, request), body.every, body.at, body.by_bookmarks, body.name)
 
 
 @router.post("/extract-images", status_code=202)
@@ -608,3 +632,367 @@ def props_set(body: PropsSetRequest, request: Request):
     src = _checked(body.input, request, True)
     out = _checked_output(body.output, request)
     return _job(request, "pdf.set_props", edit.set_properties, str(src), str(out), body.metadata, body.toc, creates=[str(out)])
+
+
+# ---- light conversions and target sizes -------------------------------------------------------
+
+
+class TablesRequest(BaseModel):
+    input: str
+    out_dir: str
+    pages: str | None = None
+
+
+class HtmlOutRequest(BaseModel):
+    input: str
+    output: str
+    pages: str | None = None
+
+
+class WebToPdfRequest(BaseModel):
+    input: str  # .html, .md or .txt file
+    output: str
+    paper: Literal["a4", "a5", "letter", "legal"] = "a4"
+
+
+class TargetSizeRequest(BaseModel):
+    input: str
+    output: str
+    max_mb: float = Field(gt=0.05, le=2000)
+
+
+class SplitSizeRequest(BaseModel):
+    input: str
+    out_dir: str
+    max_mb: float = Field(gt=0.05, le=2000)
+
+
+@router.post("/tables-to-csv", status_code=202)
+def tables_to_csv(body: TablesRequest, request: Request):
+    src = _checked(body.input, request, True)
+    return _job(request, "pdf.tables", convert.pdf_tables_to_csv, str(src), _dir(body.out_dir, request), body.pages)
+
+
+@router.post("/to-html", status_code=202)
+def to_html(body: HtmlOutRequest, request: Request):
+    src = _checked(body.input, request, True)
+    out = _checked_output(body.output, request)
+    return _job(request, "pdf.to_html", convert.pdf_to_html, str(src), str(out), body.pages, creates=[str(out)])
+
+
+@router.post("/from-web", status_code=202)
+def from_web(body: WebToPdfRequest, request: Request):
+    src = _checked(body.input, request, True)
+    if src.suffix.lower() not in (".html", ".htm", ".md", ".markdown", ".txt"):
+        raise HTTPException(status_code=422, detail="choose an .html, .md or .txt file")
+    out = _checked_output(body.output, request)
+    return _job(request, "pdf.from_web", convert.html_to_pdf, str(src), str(out), body.paper, creates=[str(out)])
+
+
+@router.post("/compress-to-size", status_code=202)
+def compress_to_size(body: TargetSizeRequest, request: Request):
+    src = _checked(body.input, request, True)
+    out = _checked_output(body.output, request)
+    return _job(request, "pdf.compress", convert.compress_to_size, str(src), str(out), int(body.max_mb * 1024 * 1024), creates=[str(out)])
+
+
+@router.post("/split-by-size", status_code=202)
+def split_by_size(body: SplitSizeRequest, request: Request):
+    src = _checked(body.input, request, True)
+    return _job(request, "pdf.split_parts", convert.split_by_size, str(src), _dir(body.out_dir, request), int(body.max_mb * 1024 * 1024))
+
+
+# ---- compare, pictures, text lookup, attachments, repair, layouts, scans, batch ----------------
+
+
+class CompareRequest(BaseModel):
+    a: str
+    b: str
+
+
+class ImagesListRequest(ViewRequest):
+    page: int = Field(default=1, ge=1)
+
+
+class ImageAction(BaseModel):
+    page: int = Field(ge=1)
+    xref: int
+    action: Literal["delete", "replace"]
+    path: str | None = None
+
+
+class ImagesApplyRequest(BaseModel):
+    input: str
+    output: str
+    actions: list[ImageAction] = Field(min_length=1, max_length=500)
+
+
+class TextAtRequest(ViewRequest):
+    page: int = Field(default=1, ge=1)
+    x: float
+    y: float
+
+
+class LabelSpec(BaseModel):
+    startpage: int = Field(ge=1)
+    prefix: str = Field(default="", max_length=20)
+    style: Literal["D", "r", "R", "a", "A", ""] = "D"
+    firstpagenum: int = Field(default=1, ge=1)
+
+
+class AttachRequest(BaseModel):
+    input: str
+    output: str
+    add: list[str] = []
+    remove: list[str] = []
+    labels: list[LabelSpec] | None = None
+
+
+class RestrictRequest(BaseModel):
+    input: str
+    output: str
+    owner_password: str = Field(min_length=1)
+    allow: list[Literal["print", "copy", "edit", "annotate"]] = []
+
+
+class ImposeRequest(BaseModel):
+    input: str
+    output: str
+    mode: Literal["nup", "booklet"] = "nup"
+    per_sheet: int = Field(default=2, ge=2, le=16)
+    paper: Literal["A4", "A3", "Letter"] = "A4"
+    landscape: bool = True
+    border: bool = False
+
+
+class CleanScanRequest(BaseModel):
+    input: str
+    output: str
+    deskew: bool = True
+    crop: bool = True
+    mode: Literal["contrast", "gray", "bw"] = "contrast"
+
+
+class BatchStep(BaseModel):
+    type: Literal["compress", "watermark", "numbers", "clean_metadata", "grayscale", "encrypt"]
+    dpi: int | None = Field(default=None, ge=36, le=400)
+    quality: int | None = Field(default=None, ge=10, le=100)
+    text: str | None = Field(default=None, max_length=200)
+    position: str | None = None
+    password: str | None = None
+
+
+class BatchRequest(BaseModel):
+    inputs: list[str] = Field(min_length=1, max_length=2000)
+    out_dir: str
+    steps: list[BatchStep] = Field(min_length=1, max_length=8)
+
+
+@router.post("/compare", status_code=202)
+def compare(body: CompareRequest, request: Request):
+    a = _checked(body.a, request, True)
+    b = _checked(body.b, request, True)
+    return _job(request, "pdf.compare", more.compare_pdfs, str(a), str(b))
+
+
+@router.post("/images/list")
+def images_list(body: ImagesListRequest, request: Request):
+    return _viewer_call(more.list_images, _view(request, body.input), body.page, body.password)
+
+
+@router.post("/images/apply", status_code=202)
+def images_apply(body: ImagesApplyRequest, request: Request):
+    src = _checked(body.input, request, True)
+    out = _checked_output(body.output, request)
+    actions = []
+    for a in body.actions:
+        d = a.model_dump()
+        if d.get("path"):
+            d["path"] = str(_checked(d["path"], request, True))
+        actions.append(d)
+    return _job(request, "pdf.images", more.change_images, str(src), str(out), actions, creates=[str(out)])
+
+
+@router.post("/text-at")
+def text_at(body: TextAtRequest, request: Request):
+    return _viewer_call(more.text_at, _view(request, body.input), body.page, body.x, body.y, body.password)
+
+
+@router.post("/attachments/list")
+def attachments_list(body: ViewRequest, request: Request):
+    return _viewer_call(more.list_attachments, _view(request, body.input), body.password)
+
+
+@router.post("/attachments/save", status_code=202)
+def attachments_save(body: AttachRequest, request: Request):
+    src = _checked(body.input, request, True)
+    out = _checked_output(body.output, request)
+    add = [str(_checked(p, request, True)) for p in body.add]
+    labels = [lab.model_dump() for lab in body.labels] if body.labels is not None else None
+    return _job(request, "pdf.set_props", more.set_attachments_and_labels, str(src), str(out), add, body.remove, labels, creates=[str(out)])
+
+
+@router.post("/restrict", status_code=202)
+def restrict(body: RestrictRequest, request: Request):
+    src = _checked(body.input, request, True)
+    out = _checked_output(body.output, request)
+    return _job(request, "pdf.encrypt", more.restrict_pdf, str(src), str(out), body.owner_password, body.allow, creates=[str(out)])
+
+
+@router.post("/repair", status_code=202)
+def repair(body: SimpleConvertRequest, request: Request):
+    src = _checked(body.input, request, True)
+    out = _checked_output(body.output, request)
+    return _job(request, "pdf.repair", more.repair_pdf, str(src), str(out), creates=[str(out)])
+
+
+@router.post("/impose", status_code=202)
+def impose(body: ImposeRequest, request: Request):
+    src = _checked(body.input, request, True)
+    out = _checked_output(body.output, request)
+    return _job(request, "pdf.impose", more.impose_pdf, str(src), str(out), body.mode, body.per_sheet, body.paper, body.landscape, 18, 8, body.border, creates=[str(out)])
+
+
+@router.post("/clean-scan", status_code=202)
+def clean_scan(body: CleanScanRequest, request: Request):
+    src = _checked(body.input, request, True)
+    out = _checked_output(body.output, request)
+    return _job(request, "pdf.clean_scan", more.clean_scan_pages, str(src), str(out), body.deskew, body.crop, body.mode, creates=[str(out)])
+
+
+@router.post("/batch", status_code=202)
+def batch(body: BatchRequest, request: Request):
+    inputs = [str(_checked(p, request, False)) for p in body.inputs]
+    steps = [{k: v for k, v in s.model_dump().items() if v is not None} for s in body.steps]
+    for s in steps:
+        if s["type"] == "encrypt" and not s.get("password"):
+            raise HTTPException(status_code=422, detail="choose a password for the encryption step")
+    return _job(request, "pdf.batch", more.run_batch, inputs, _dir(body.out_dir, request), steps)
+
+
+class SignRequest(BaseModel):
+    input: str
+    output: str
+    certificate: str  # .pfx / .p12
+    password: str = ""
+    reason: str = Field(default="", max_length=200)
+    location: str = Field(default="", max_length=200)
+    visible: bool = False
+    page: int = Field(default=1, ge=1)
+
+
+@router.post("/sign", status_code=202)
+def sign(body: SignRequest, request: Request):
+    src = _checked(body.input, request, True)
+    cert = _checked(body.certificate, request, True)
+    out = _checked_output(body.output, request)
+    return _job(request, "pdf.sign", signing.sign_pdf, str(src), str(out), str(cert), body.password, body.reason, body.location, body.visible, body.page, creates=[str(out)])
+
+
+@router.post("/signatures")
+def signatures(body: ViewRequest, request: Request):
+    return _viewer_call(signing.verify_signatures, _view(request, body.input))
+
+
+class TextBetweenRequest(ViewRequest):
+    page: int = Field(default=1, ge=1)
+    ax: float
+    ay: float
+    bx: float
+    by: float
+
+
+@router.post("/text-between")
+def text_between(body: TextBetweenRequest, request: Request):
+    return _viewer_call(more.text_between, _view(request, body.input), body.page, body.ax, body.ay, body.bx, body.by, body.password)
+
+
+class ObjectsRequest(ViewRequest):
+    page: int = Field(default=1, ge=1)
+
+
+class OrigImageRequest(ViewRequest):
+    xref: int
+
+
+class PlanEntry(BaseModel):
+    source: int = Field(default=0, ge=0)
+    page: int = Field(default=1, ge=1)
+    rotate: int = Field(default=0, ge=-360, le=360)
+    blank: bool = False
+    width: float = Field(default=595, gt=10, le=5000)
+    height: float = Field(default=842, gt=10, le=5000)
+
+
+class BuildRequest(BaseModel):
+    sources: list[str] = Field(min_length=1, max_length=20)
+    plan: list[PlanEntry] = Field(min_length=1, max_length=5000)
+
+
+class AssemblePart(BaseModel):
+    output: str
+    plan: list[PlanEntry] = Field(min_length=1, max_length=5000)
+
+
+class AssembleRequest(BaseModel):
+    sources: list[str] = Field(min_length=1, max_length=40)
+    parts: list[AssemblePart] = Field(min_length=1, max_length=200)
+
+
+@router.post("/assemble", status_code=202)
+def assemble(body: AssembleRequest, request: Request):
+    """Merge, reorder, rotate, remove and split in one go: each part becomes its own file."""
+    sources = [str(_checked(p, request, True)) for p in body.sources]
+    outputs = [str(_checked_output(p.output, request)) for p in body.parts]
+    if len(set(outputs)) != len(outputs):
+        raise HTTPException(status_code=400, detail="two files would get the same name")
+    if any(not 0 <= e.source < len(sources) for p in body.parts for e in p.plan if not e.blank):
+        raise HTTPException(status_code=400, detail="a page refers to a file that is not in the list")
+    parts = [{"output": o, "plan": [e.model_dump() for e in p.plan]} for o, p in zip(outputs, body.parts)]
+    return _job(request, "pdf.assemble", more.assemble_pdfs, sources, parts, creates=outputs)
+
+
+@router.post("/page-objects")
+def page_objects(body: ObjectsRequest, request: Request):
+    return _viewer_call(more.page_objects, _view(request, body.input), body.page, body.password)
+
+
+@router.post("/original-image")
+def original_image(body: OrigImageRequest, request: Request):
+    return _viewer_call(more.original_image, _view(request, body.input), body.xref, 1400, body.password)
+
+
+@router.post("/work/build")
+def work_build(body: BuildRequest, request: Request):
+    """Builds a working copy from pages of one or more PDFs. The originals are never touched; the copy lives in the app's data folder."""
+    import uuid
+
+    sources = [str(_checked(p, request, True)) for p in body.sources]
+    work = request.app.state.settings.data_dir / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    dest = work / f"{uuid.uuid4().hex[:12]}.pdf"
+    return _viewer_call(more.build_pdf, sources, [e.model_dump() for e in body.plan], str(dest))
+
+
+class WorkEditRequest(BaseModel):
+    input: str
+    ops: list[Op] = Field(default=[], max_length=2000)
+    flatten: bool = False
+    numbers: StampSettings | None = None
+
+
+@router.post("/work/edit")
+def work_edit(body: WorkEditRequest, request: Request):
+    """Applies the edits into a new working copy (used before splitting or extracting pages, so the edits are included)."""
+    import uuid
+
+    src = _checked(body.input, request, True)
+    work = request.app.state.settings.data_dir / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    dest = work / f"{uuid.uuid4().hex[:12]}.pdf"
+    numbers = None
+    if body.numbers:
+        n = body.numbers
+        numbers = {"items": [i.model_dump() for i in n.items], "pages": n.pages, "size": n.size, "margin": n.margin, "color": n.color, "font": n.font, "bold": n.bold, "start_at": n.start_at, "opacity": n.opacity}
+    r = _viewer_call(edit.edit_pdf, str(src), str(dest), _edit_ops(body.ops, request), body.flatten, numbers)
+    return {"path": str(dest), **r}

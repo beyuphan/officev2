@@ -295,6 +295,237 @@ def _op_levels(img: Image.Image, op: dict, scale: float) -> Image.Image:
     return _join(x * 255.0, alpha)
 
 
+def _monotone_curve(points: list[tuple[float, float]]) -> np.ndarray:
+    """256-entry lookup table through the points (0..255), smooth and never overshooting (monotone cubic)."""
+    pts = sorted({(min(255.0, max(0.0, x)), min(255.0, max(0.0, y))) for x, y in points})
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    if xs[0] > 0:
+        xs.insert(0, 0.0)
+        ys.insert(0, ys[0])
+    if xs[-1] < 255:
+        xs.append(255.0)
+        ys.append(ys[-1])
+    n = len(xs)
+    d = [(ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]) for i in range(n - 1)]
+    m = [d[0]] + [0.0 if d[i - 1] * d[i] <= 0 else (d[i - 1] + d[i]) / 2 for i in range(1, n - 1)] + [d[-1]]
+    for i in range(n - 1):
+        if d[i] == 0:
+            m[i] = m[i + 1] = 0.0
+        else:
+            a, b = m[i] / d[i], m[i + 1] / d[i]
+            r = a * a + b * b
+            if r > 9:
+                t = 3 / math.sqrt(r)
+                m[i], m[i + 1] = t * a * d[i], t * b * d[i]
+    x = np.arange(256, dtype=np.float64)
+    xa, ya, ma = np.array(xs), np.array(ys), np.array(m)
+    idx = np.clip(np.searchsorted(xa, x, side="right") - 1, 0, n - 2)
+    h = xa[idx + 1] - xa[idx]
+    t = (x - xa[idx]) / h
+    out = (
+        (2 * t**3 - 3 * t**2 + 1) * ya[idx]
+        + (t**3 - 2 * t**2 + t) * h * ma[idx]
+        + (-2 * t**3 + 3 * t**2) * ya[idx + 1]
+        + (t**3 - t**2) * h * ma[idx + 1]
+    )
+    return np.clip(out, 0, 255)
+
+
+def _op_curves(img: Image.Image, op: dict, scale: float) -> Image.Image:
+    """Tone curves. `points`: [[x, y], ...] with 0..255 on both axes; `channel`: rgb (default), r, g or b."""
+    if isinstance(op.get("channels"), dict):  # {"rgb": [...], "r": [...], ...}: one op, every channel
+        jobs = list(op["channels"].items())
+    else:
+        jobs = [(str(op.get("channel", "rgb")).lower(), op.get("points"))]
+    rgb, alpha = _split(img)
+    out = rgb.copy()
+    for channel, raw in jobs:
+        if channel not in ("rgb", "r", "g", "b"):
+            raise ValueError("channel must be rgb, r, g or b")
+        if not isinstance(raw, list) or len(raw) < 2 or len(raw) > 32:
+            raise ValueError("give between 2 and 32 points")
+        try:
+            points = [(float(p[0]), float(p[1])) for p in raw]
+        except (TypeError, ValueError, IndexError):
+            raise ValueError("each point is [x, y]")
+        lut = _monotone_curve(points)
+        for c, name in enumerate("rgb"):
+            if channel in ("rgb", name):
+                out[..., c] = np.interp(out[..., c], np.arange(256), lut)
+    return _join(out, alpha)
+
+
+_HSL_BANDS = {"red": 0, "orange": 30, "yellow": 60, "green": 120, "aqua": 180, "blue": 240, "purple": 270, "magenta": 315}
+
+
+def _op_hsl(img: Image.Image, op: dict, scale: float) -> Image.Image:
+    """Colour by band. `bands`: {"red": {"hue": -100..100, "sat": ..., "lum": ...}, "blue": {...}, ...}."""
+    bands = op.get("bands")
+    if not isinstance(bands, dict) or not bands:
+        raise ValueError("give at least one colour band")
+    rgb, alpha = _split(img)
+    hsv = cv2.cvtColor(np.clip(rgb, 0, 255).astype(np.float32) / 255.0, cv2.COLOR_RGB2HSV)  # H 0..360, S/V 0..1
+    ref = hsv[..., 0].copy()
+    weight_sat = np.clip(hsv[..., 1] * 4.0, 0.0, 1.0)  # grey pixels have no real hue
+    sat, val = hsv[..., 1].copy(), hsv[..., 2].copy()
+    for name, v in bands.items():
+        if name not in _HSL_BANDS or not isinstance(v, dict):
+            raise ValueError(f"unknown colour '{name}'")
+        d = np.abs((ref - _HSL_BANDS[name] + 180.0) % 360.0 - 180.0)
+        w = np.clip(1.0 - d / 40.0, 0.0, 1.0) * weight_sat
+        dh, ds, dl = _num(v, "hue", 0, -100, 100), _num(v, "sat", 0, -100, 100), _num(v, "lum", 0, -100, 100)
+        hsv[..., 0] = hsv[..., 0] + w * dh * 0.3
+        sat = sat * (1.0 + w * ds / 100.0)
+        val = val * (1.0 + w * dl / 200.0)
+    hsv[..., 0] = hsv[..., 0] % 360.0
+    hsv[..., 1] = np.clip(sat, 0, 1)
+    hsv[..., 2] = np.clip(val, 0, 1)
+    out = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB) * 255.0
+    return _join(out, alpha)
+
+
+def _op_perspective(img: Image.Image, op: dict, scale: float) -> Image.Image:
+    """Straighten a leaning photo or a skewed page. `points`: the four corners [[x, y] x4] of the area that
+    should become the whole picture (top-left, top-right, bottom-right, bottom-left), each 0..1 of the image."""
+    pts = op.get("points")
+    try:
+        quad = np.array([[float(p[0]), float(p[1])] for p in pts], dtype=np.float32)
+    except (TypeError, ValueError, IndexError):
+        quad = None
+    if quad is None or quad.shape != (4, 2):
+        raise ValueError("give four corner points")
+    if quad.min() < -0.5 or quad.max() > 1.5:
+        raise ValueError("corners must lie on the picture")
+    w, h = img.size
+    src = quad * np.array([w, h], dtype=np.float32)
+    dst = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
+    try:
+        m = cv2.getPerspectiveTransform(src, dst)
+    except cv2.error:
+        raise ValueError("the corners do not form a valid shape")
+    warped = cv2.warpPerspective(np.asarray(img.convert("RGBA")), m, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return Image.fromarray(warped, "RGBA")
+
+
+def _op_denoise(img: Image.Image, op: dict, scale: float) -> Image.Image:
+    """Noise reduction (non-local means). `strength` 1..30."""
+    h = _num(op, "strength", 8, 1, 30)
+    rgb, alpha = _split(img)
+    out = cv2.fastNlMeansDenoisingColored(np.clip(rgb, 0, 255).astype(np.uint8), None, h, h, 5, 15)
+    return _join(out.astype(np.float32), alpha)
+
+
+def _hex_rgb(value: Any, default: str) -> np.ndarray:
+    return np.array(parse_color(value or default)[:3], dtype=np.float32) / 255.0
+
+
+def _op_grade(img: Image.Image, op: dict, scale: float) -> Image.Image:
+    """Colour grading: tint the shadows, midtones and highlights. Each is a colour; `amount` 0..1."""
+    amount = _num(op, "amount", 0.5, 0, 1)
+    rgb, alpha = _split(img)
+    x = rgb / 255.0
+    lum = np.clip(_luma(x), 0, 1)[..., None]
+    ws, wh = (1 - lum) ** 2, lum**2
+    wm = np.clip(1 - ws - wh, 0, 1)
+    for key, w in (("shadows", ws), ("midtones", wm), ("highlights", wh)):
+        if op.get(key):
+            c = _hex_rgb(op[key], "#808080")
+            x = x + (c - c.mean()) * amount * 0.6 * w
+    return _join(np.clip(x, 0, 1) * 255.0, alpha)
+
+
+_LUT_CACHE: dict[tuple[str, int], tuple[int, np.ndarray]] = {}
+
+
+def _load_cube(path: str) -> tuple[int, np.ndarray]:
+    p = Path(path)
+    key = (str(p), p.stat().st_mtime_ns)
+    if key in _LUT_CACHE:
+        return _LUT_CACHE[key]
+    size, rows = 0, []
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.upper().startswith("LUT_3D_SIZE"):
+            size = int(line.split()[1])
+        elif line[0].isdigit() or line[0] in "-.":
+            parts = line.split()
+            if len(parts) == 3:
+                rows.append([float(v) for v in parts])
+    if size < 2 or len(rows) != size**3:
+        raise ValueError("this is not a valid 3D .cube file")
+    table = np.array(rows, dtype=np.float32).reshape(size, size, size, 3)  # index [b][g][r]
+    _LUT_CACHE.clear()
+    _LUT_CACHE[key] = (size, table)
+    return _LUT_CACHE[key]
+
+
+def _op_lut(img: Image.Image, op: dict, scale: float) -> Image.Image:
+    """Apply a .cube colour look. `path`, `intensity` 0..1."""
+    if not op.get("path"):
+        raise ValueError("choose a .cube file")
+    size, table = _load_cube(str(op["path"]))
+    k = _num(op, "intensity", 1, 0, 1)
+    rgb, alpha = _split(img)
+    x = np.clip(rgb / 255.0, 0, 1) * (size - 1)
+    i0 = np.floor(x).astype(np.int32)
+    i1 = np.minimum(i0 + 1, size - 1)
+    f = x - i0
+    r0, g0, b0 = i0[..., 0], i0[..., 1], i0[..., 2]
+    r1, g1, b1 = i1[..., 0], i1[..., 1], i1[..., 2]
+    fr, fg, fb = f[..., 0:1], f[..., 1:2], f[..., 2:3]
+    c00 = table[b0, g0, r0] * (1 - fr) + table[b0, g0, r1] * fr
+    c01 = table[b0, g1, r0] * (1 - fr) + table[b0, g1, r1] * fr
+    c10 = table[b1, g0, r0] * (1 - fr) + table[b1, g0, r1] * fr
+    c11 = table[b1, g1, r0] * (1 - fr) + table[b1, g1, r1] * fr
+    out = (c00 * (1 - fg) + c01 * fg) * (1 - fb) + (c10 * (1 - fg) + c11 * fg) * fb
+    out = np.clip(out, 0, 1) * 255.0
+    return _join(rgb * (1 - k) + out * k, alpha)
+
+
+def _op_lens(img: Image.Image, op: dict, scale: float) -> Image.Image:
+    """Lens distortion: `amount` -100..100 (positive pulls a barrel-shaped photo straight)."""
+    k = _num(op, "amount", 0, -100, 100) / 100.0 * 0.4
+    if abs(k) < 1e-3:
+        return img
+    arr = np.asarray(img.convert("RGBA"))
+    h, w = arr.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    nx, ny = (xx - w / 2) / (w / 2), (yy - h / 2) / (h / 2)
+    r2 = nx * nx + ny * ny
+    f = 1 + k * r2
+    mx, my = nx * f * (w / 2) + w / 2, ny * f * (h / 2) + h / 2
+    out = cv2.remap(arr, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return Image.fromarray(out, "RGBA")
+
+
+def _op_qr(img: Image.Image, op: dict, scale: float) -> Image.Image:
+    """A QR code. `text` is what it holds; `x`, `y` the centre and `w` the width, as fractions of the picture."""
+    import io
+
+    try:
+        import segno
+    except ImportError:
+        raise ValueError("the QR code add-on is not installed")
+    text = str(op.get("text", "")).strip()
+    if not text:
+        raise ValueError("type what the QR code should hold")
+    if len(text) > 900:
+        raise ValueError("that text is too long for a QR code")
+    code = segno.make(text, error="m")
+    buf = io.BytesIO()
+    code.save(buf, kind="png", scale=8, border=2, dark=str(op.get("color", "#000000")), light=str(op.get("background", "#ffffff")))
+    tile = Image.open(buf).convert("RGBA")
+    w = max(24, round(_num(op, "w", 0.2, 0.04, 0.9) * img.width))
+    tile = tile.resize((w, w), Image.NEAREST)
+    cx, cy = _num(op, "x", 0.85, 0, 1) * img.width, _num(op, "y", 0.85, 0, 1) * img.height
+    out = img.convert("RGBA")
+    out.alpha_composite(tile, (int(min(max(0, cx - w / 2), max(0, img.width - w))), int(min(max(0, cy - w / 2), max(0, img.height - w)))))
+    return out
+
+
 def _vignette_arr(shape: tuple[int, int], strength: float) -> np.ndarray:
     h, w = shape
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
@@ -305,7 +536,7 @@ def _vignette_arr(shape: tuple[int, int], strength: float) -> np.ndarray:
 
 def _op_vignette(img: Image.Image, op: dict, scale: float) -> Image.Image:
     rgb, alpha = _split(img)
-    return _join(rgb * _vignette_arr(rgb.shape[:2], _num(op, "strength", 0.5, 0, 1))[..., None], alpha)
+    return _join(rgb * _vignette_arr(rgb.shape[:2], _num(op, "strength", 0.5, -1, 1))[..., None], alpha)
 
 
 def _op_grain(img: Image.Image, op: dict, scale: float) -> Image.Image:
@@ -612,6 +843,9 @@ _BG_SESSION: dict[str, Any] = {}
 def _op_remove_background(img: Image.Image, op: dict, scale: float, data_dir: str | None) -> Image.Image:
     if not data_dir or not models.is_installed(data_dir, "rembg-u2netp"):
         raise ValueError("Install 'Background remover (small, fast)' from Models first.")
+    from ... import extras
+
+    extras.require("background")
     from rembg import new_session, remove
 
     os.environ["U2NET_HOME"] = str(models.model_dir(data_dir, "rembg-u2netp"))
@@ -634,6 +868,15 @@ _SIMPLE: dict[str, Callable[[Image.Image, dict, float], Image.Image]] = {
     "rounded": _op_rounded,
     "adjust": _op_adjust,
     "levels": _op_levels,
+    "curves": _op_curves,
+    "hsl": _op_hsl,
+    "perspective": _op_perspective,
+    "denoise": _op_denoise,
+    "grade": _op_grade,
+    "lut": _op_lut,
+    "lens": _op_lens,
+    "inner_rounded": _op_rounded,
+    "qr": _op_qr,
     "filter": _op_filter,
     "auto": _op_auto,
     "blur": _op_blur,
@@ -756,7 +999,7 @@ def filter_thumbnails(path: str, ops: list[dict], data_dir: str | None = None, s
     current = apply_ops(base, ops, scale, data_dir)
     f = side / max(current.size)
     small = current.resize((max(1, round(current.width * f)), max(1, round(current.height * f))), Image.LANCZOS)
-    out = {}
+    out = {"__none__": _encode(small)[0]}  # the tile for "no filter" shows the photo as it is now
     for name in FILTERS:
         image, _ = _encode(_apply_filter(small, name, scale * f))
         out[name] = image
@@ -779,6 +1022,17 @@ def _save(img: Image.Image, output: Path, fmt: str, quality: int, background: st
         img.save(output, "PNG", optimize=True)
     elif fmt == "webp":
         img.save(output, "WEBP", quality=quality, **params)
+    elif fmt == "avif":
+        img.save(output, "AVIF", quality=quality)
+    elif fmt == "gif":
+        img.convert("RGBA").save(output, "GIF")
+    elif fmt == "ico":
+        side = min(256, max(img.size))  # icons are square: centre the picture on a transparent square
+        small = img.copy()
+        small.thumbnail((side, side), Image.LANCZOS)
+        square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        square.paste(small, ((side - small.width) // 2, (side - small.height) // 2))
+        square.save(output, "ICO", sizes=[(s, s) for s in (16, 32, 48, 64, 128, 256) if s <= side] or [(side, side)])
     elif fmt == "tiff":
         img.save(output, "TIFF", **params)
     elif fmt == "bmp":
@@ -793,7 +1047,7 @@ def _save(img: Image.Image, output: Path, fmt: str, quality: int, background: st
         raise ValueError(f"unsupported format '{fmt}'")
 
 
-EXT = {"jpeg": ".jpg", "jpg": ".jpg", "png": ".png", "webp": ".webp", "tiff": ".tiff", "bmp": ".bmp", "pdf": ".pdf"}
+EXT = {"jpeg": ".jpg", "jpg": ".jpg", "png": ".png", "webp": ".webp", "tiff": ".tiff", "bmp": ".bmp", "pdf": ".pdf", "avif": ".avif", "gif": ".gif", "ico": ".ico"}
 
 
 def export_photo(

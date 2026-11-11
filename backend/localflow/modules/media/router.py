@@ -33,7 +33,7 @@ def _data_dir(request: Request) -> str:
 class ImagesRequest(BaseModel):
     inputs: list[str] = Field(min_length=1)
     out_dir: str
-    format: Literal["webp", "jpeg", "png", "same"] = "webp"
+    format: Literal["webp", "jpeg", "png", "avif", "ico", "same"] = "webp"
     quality: int = Field(default=80, ge=1, le=100)
     max_side: int = Field(default=0, ge=0, le=20000)
     strip_metadata: bool = True
@@ -81,11 +81,12 @@ class UpscaleRequest(BaseModel):
     inputs: list[str] = Field(min_length=1)
     out_dir: str
     scale: Literal[2, 3, 4] = 4
+    method: Literal["basic", "ai"] = "basic"
 
 
 @router.post("/upscale", status_code=202)
 def upscale(body: UpscaleRequest, request: Request):
     return request.app.state.jobs.submit(
         "media.upscale", ops.upscale_images, _inputs(body.inputs, request), _out_dir(body.out_dir, request),
-        _data_dir(request), body.scale,
+        _data_dir(request), body.scale, body.method,
     ).to_dict()

@@ -56,6 +56,9 @@ def _decode_audio(path: Path):
 
 
 def _run_model(model_dir: Path, audio, language: str | None, device: str, compute: str) -> tuple[list[dict], dict]:
+    from ... import extras
+
+    extras.require("speech")
     from faster_whisper import WhisperModel
 
     model = WhisperModel(str(model_dir), device=device, compute_type=compute)

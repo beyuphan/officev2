@@ -21,13 +21,29 @@ def default_data_dir() -> Path:
     return Path(base) / "officev2"
 
 
+def default_roots() -> tuple[Path, ...]:
+    """The home folder plus every drive, so a file on another drive opens like one in Documents (D: drive). The API still needs the token."""
+    roots = [Path.home().resolve()]
+    if os.name == "nt":
+        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            drive = Path(f"{letter}:\\")
+            try:
+                if drive.exists():
+                    roots.append(drive)
+            except OSError:
+                continue
+    else:
+        roots += [Path(p) for p in ("/mnt", "/media", "/Volumes") if Path(p).exists()]
+    return tuple(dict.fromkeys(roots))
+
+
 @dataclass(frozen=True)
 class Settings:
     token: str
     data_dir: Path = field(default_factory=default_data_dir)
     allowed_origins: tuple[str, ...] = DEFAULT_ORIGINS
     # Directories the API may read from / write to. Everything else is rejected.
-    allowed_roots: tuple[Path, ...] = field(default_factory=lambda: (Path.home(),))
+    allowed_roots: tuple[Path, ...] = field(default_factory=lambda: default_roots())
 
     @staticmethod
     def from_env() -> "Settings":
@@ -41,6 +57,6 @@ class Settings:
         roots = (
             tuple(Path(p).resolve() for p in roots_env.split(os.pathsep) if p)
             if roots_env
-            else (Path.home().resolve(),)
+            else default_roots()
         )
         return Settings(token=token, allowed_roots=roots)

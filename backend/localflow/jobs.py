@@ -6,6 +6,7 @@ import multiprocessing
 import time
 import uuid
 from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -39,6 +40,10 @@ class Job:
             exc = f.exception()
             if isinstance(exc, jobctl.Cancelled):
                 self.state = CANCELLED
+            elif isinstance(exc, BrokenProcessPool):
+                self.state, self.error = FAILED, "The worker stopped unexpectedly (a file may be damaged). Try again."
+                if self._manager is not None:
+                    self._manager.reset_pool()
             elif exc is not None:
                 self.state, self.error = FAILED, str(exc)
             else:
@@ -68,6 +73,7 @@ class JobManager:
     def __init__(self, db: Database, history: History, max_workers: int = 2):
         self._db = db
         self._history = history
+        self._max_workers = max_workers
         self._pool = ProcessPoolExecutor(max_workers=max_workers)
         self._mp = multiprocessing.Manager()
         self._progress = self._mp.dict()
@@ -79,6 +85,10 @@ class JobManager:
             "WHERE state IN ('queued','running')",
             (time.time(),),
         )
+
+    def reset_pool(self) -> None:
+        old, self._pool = self._pool, ProcessPoolExecutor(max_workers=self._max_workers)
+        old.shutdown(wait=False, cancel_futures=False)
 
     def progress_of(self, job_id: str) -> dict | None:
         p = self._progress.get(job_id)
@@ -102,7 +112,11 @@ class JobManager:
             "INSERT INTO jobs(id, type, state, created_at) VALUES (?,?,?,?)",
             (job.id, job.type, job.state, job.created_at),
         )
-        job._future = self._pool.submit(jobctl.run, fn, args, kwargs, job.id, self._progress, self._cancel)
+        try:
+            job._future = self._pool.submit(jobctl.run, fn, args, kwargs, job.id, self._progress, self._cancel)
+        except BrokenProcessPool:  # an earlier job crashed a worker: start fresh instead of failing every job from now on
+            self.reset_pool()
+            job._future = self._pool.submit(jobctl.run, fn, args, kwargs, job.id, self._progress, self._cancel)
         self._jobs[job.id] = job
         return job
 

@@ -117,6 +117,6 @@ def test_upscale_requires_explicit_install_of_the_binary(client, tmp_path):
     src, out = tmp_path / "in", tmp_path / "out"
     src.mkdir()
     make_image(src / "small.png", (48, 32))
-    job = post_job(client, "/media/upscale", {"inputs": [str(src)], "out_dir": str(out), "scale": 4})
+    job = post_job(client, "/media/upscale", {"inputs": [str(src)], "out_dir": str(out), "scale": 4, "method": "ai"})
     assert job["state"] == "failed" and "Install it from the Models screen" in job["error"]
     assert not (tmp_path / "_data" / "models" / "realesrgan").exists()

@@ -279,3 +279,46 @@ def test_ocr_unknown_engine_rejected(client, tmp_path):
     make_pdf(src, 1)
     r = client.post("/pdf/ocr", headers=AUTH, json={"input": str(src), "output": str(tmp_path / "o.pdf"), "engine": "x"})
     assert r.status_code == 422
+
+
+def _crash_the_worker():
+    import os
+
+    os._exit(3)
+
+
+def test_a_crashed_worker_does_not_break_later_jobs(client, tmp_path):
+    jobs = client.app.state.jobs
+    bad = jobs.submit("test.crash", _crash_the_worker)
+    end = time.time() + 30
+    while time.time() < end and bad.to_dict()["state"] not in ("done", "failed", "cancelled"):
+        time.sleep(0.1)
+    assert bad.to_dict()["state"] == "failed" and "stopped unexpectedly" in bad.to_dict()["error"]
+    src = tmp_path / "a.pdf"
+    make_pdf(src, 2)
+    r = client.post("/pdf/split", headers=AUTH, json={"input": str(src), "pages": "1", "output": str(tmp_path / "o.pdf")})
+    assert r.status_code == 202 and wait_job(client, r.json()["id"])["state"] == "done"
+
+
+def test_unexpected_errors_come_back_as_readable_json(client, monkeypatch):
+    from localflow.modules.pdf import router as pdf_router
+
+    def boom(*a, **k):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(pdf_router.more, "page_objects", boom)
+    r = client.post("/pdf/page-objects", headers=AUTH, json={"input": "x.pdf", "page": 1})
+    assert r.status_code in (403, 404, 500)
+    if r.status_code == 500:
+        assert "kaboom" in r.json()["detail"]
+
+
+def test_default_roots_cover_other_drives():
+    import os
+
+    from localflow.config import default_roots
+
+    roots = default_roots()
+    assert any(r == __import__("pathlib").Path.home().resolve() for r in roots)
+    if os.name == "nt":
+        assert any(str(r).upper().startswith("C:") for r in roots) and len(roots) >= 2

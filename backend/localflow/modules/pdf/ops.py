@@ -222,6 +222,9 @@ def _make_windows_recognizer():
 def _make_rapid_recognizer(min_score: float):
     """Bundled ONNX engine. Works offline everywhere, but drops Turkish diacritics."""
     import numpy as np
+    from ... import extras
+
+    extras.require("ocr")
     from rapidocr_onnxruntime import RapidOCR
 
     engine = RapidOCR()
@@ -382,15 +385,21 @@ def redact_pdf(
     terms: list[str] | None = None,
     pages_spec: str | None = None,
     rects: list[dict] | None = None,
+    patterns: list[str] | None = None,
+    regex: str | None = None,
 ) -> dict:
-    """Permanently remove text matching `terms` and/or the given areas (the content underneath is deleted).
+    """Permanently remove text matching `terms`, ready-made `patterns` (email, tckn, iban, phone, card), a custom
+    `regex` and/or the given areas (the content underneath is deleted).
 
     `rects` are {"page": 1-based, "x0", "y0", "x1", "y1"} in the coordinates of the page as it is displayed
     (points, origin top-left, after the page's own rotation): the same space the preview and search use.
     """
+    from . import patterns as pat
+
     terms = [t for t in (t.strip() for t in (terms or [])) if t]
     rects = rects or []
-    if not terms and not rects:
+    matchers = pat.compile_matchers(patterns or [], regex)
+    if not terms and not rects and not matchers:
         raise ValueError("nothing to redact")
     hits = 0
     with pymupdf.open(input_path) as doc:
@@ -401,6 +410,11 @@ def redact_pdf(
             for i in _select_pages(doc, pages_spec):
                 for term in terms:  # search_for already returns rectangles in page (unrotated) space
                     per_page.setdefault(i, []).extend(doc[i].search_for(term))
+        if matchers:
+            for i in _select_pages(doc, pages_spec):
+                text = doc[i].get_text()
+                for found in sorted(pat.find_all(matchers, text)):
+                    per_page.setdefault(i, []).extend(doc[i].search_for(found))
         for r in rects:
             i = int(r["page"]) - 1
             if not 0 <= i < doc.page_count:
@@ -431,6 +445,9 @@ def clean_pdf_metadata(input_path: str, output: str) -> dict:
 
 def pdf_to_docx(input_path: str, output: str) -> dict:
     """Layout-preserving as far as pdf2docx can; complex layouts and scans will not be perfect."""
+    from ... import extras
+
+    extras.require("word")
     from pdf2docx import Converter
 
     cv = Converter(input_path)
@@ -549,17 +566,31 @@ def render_thumbnails(path: str, start: int = 1, count: int = 12, width: int = 1
         return {"total": doc.page_count, "items": items}
 
 
-def search_pdf(path: str, terms: list[str], pages_spec: str | None = None, password: str | None = None) -> dict:
-    """Where each term occurs, as rectangles in displayed page coordinates (points, after page rotation)."""
+def search_pdf(
+    path: str,
+    terms: list[str],
+    pages_spec: str | None = None,
+    password: str | None = None,
+    patterns: list[str] | None = None,
+    regex: str | None = None,
+) -> dict:
+    """Where each term (or ready-made pattern such as an e-mail address) occurs, as rectangles in displayed page
+    coordinates (points, after page rotation)."""
+    from . import patterns as pat
+
     terms = [t for t in (t.strip() for t in terms) if t]
-    if not terms:
+    matchers = pat.compile_matchers(patterns or [], regex)
+    if not terms and not matchers:
         raise ValueError("no search terms")
     with _open_for_view(path, password) as doc:
         pages, total = [], 0
         for i in _select_pages(doc, pages_spec):
             page = doc[i]
             hits = []
-            for term in terms:
+            page_terms = list(terms)
+            if matchers:
+                page_terms += sorted(pat.find_all(matchers, page.get_text()) - set(terms))
+            for term in page_terms:
                 for r in page.search_for(term):
                     v = pymupdf.Rect(r) * page.rotation_matrix
                     v.normalize()

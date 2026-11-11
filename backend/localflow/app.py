@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import logging
+
 from contextlib import asynccontextmanager
 
+from fastapi.responses import JSONResponse
+from .extras import MissingExtra
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import fonts as fontlib
 from .config import Settings
 from .db import Database
 from .history import History
 from .jobs import JobManager
-from .modules.ai.index import Index
+from .modules.ai.index import LazyIndex
 from .modules.ai.router import router as ai_router
 from .modules.files.router import router as files_router
 from .modules.media.router import router as media_router
@@ -22,11 +27,25 @@ from .security import OriginGuardMiddleware, require_token
 from .system_router import router as system_router
 
 
+def _tidy_work(work) -> None:
+    """Working copies of PDFs being edited are not kept longer than three days."""
+    import time
+
+    try:
+        for f in work.iterdir():
+            if f.is_file() and time.time() - f.stat().st_mtime > 3 * 86400:
+                f.unlink()
+    except OSError:
+        pass
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        fontlib.set_custom_dir(settings.data_dir / "fonts")
+        _tidy_work(settings.data_dir / "work")
         db = Database(settings.data_dir / "localflow.db")
         history = History(db, settings.data_dir / "trash")
         app.state.db = db
@@ -37,7 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.automation.start()
         app.state.vault = VaultService(settings.data_dir / "vault")
         app.state.index_path = settings.data_dir / "index.db"
-        app.state.index = Index(app.state.index_path, str(settings.data_dir))
+        app.state.index = LazyIndex(app.state.index_path, str(settings.data_dir))
         yield
         app.state.vault.lock()
         app.state.index.close()
@@ -54,6 +73,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dependencies=[Depends(require_token)],
     )
     app.state.settings = settings
+
+    @app.middleware("http")
+    async def readable_errors(request, call_next):
+        # Inside the CORS layer, so the UI can read the message instead of seeing a blocked request
+        try:
+            return await call_next(request)
+        except MissingExtra as e:
+            return JSONResponse({"detail": str(e)}, status_code=424)
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger("localflow").exception("unhandled error in %s", request.url.path)
+            return JSONResponse({"detail": f"Something went wrong inside the engine: {type(e).__name__}: {e}"}, status_code=500)
+
     app.add_middleware(OriginGuardMiddleware, allowed_origins=settings.allowed_origins)
     # Added last so it is outermost: answers CORS preflights (which carry no token)
     # for the officev2 UI origins only.

@@ -173,6 +173,28 @@ def _validated_rule(body: RuleBody, request: Request) -> dict:
     return data
 
 
+@router.get("/known-folders")
+def known_folders():
+    """Where Downloads, Pictures, Documents and the Desktop are, so ready-made rules can point at them."""
+    from pathlib import Path
+
+    home = Path.home()
+
+    def first(*names: str) -> str:
+        for n in names:
+            p = home.joinpath(*n.split("/"))
+            if p.is_dir():
+                return str(p)
+        return str(home / names[0].split("/")[-1])
+
+    return {
+        "downloads": first("Downloads"),
+        "pictures": first("Pictures", "OneDrive/Pictures"),
+        "documents": first("Documents", "OneDrive/Documents"),
+        "desktop": first("Desktop", "OneDrive/Desktop"),
+    }
+
+
 @router.get("/rules")
 def rules_list(request: Request):
     return request.app.state.automation.list_rules()
@@ -207,3 +229,29 @@ def rules_run(rule_id: int, request: Request):
     if rule is None:
         raise HTTPException(status_code=404, detail="rule not found")
     return svc.run_now(rule)
+
+
+# ---- the files inside a folder (so the picker can show them and you can drop the ones you do not want) ----
+
+
+class FolderFilesRequest(BaseModel):
+    folder: str
+    extensions: list[str] = []  # without the dot; empty or "*" means every file
+    recursive: bool = False
+
+
+@router.post("/folder-files")
+def folder_files(body: FolderFilesRequest, request: Request):
+    root = _dir(body.folder, request)
+    exts = {("." + e.lower().lstrip(".")) for e in body.extensions if e and e != "*"}
+    it = root.rglob("*") if body.recursive else root.iterdir()
+    out = []
+    for f in sorted(it, key=lambda p: str(p).lower()):
+        try:
+            if f.is_file() and not f.name.startswith(".") and (not exts or f.suffix.lower() in exts):
+                out.append(str(f))
+        except OSError:
+            continue
+        if len(out) >= 1000:
+            break
+    return {"files": out, "truncated": len(out) >= 1000}

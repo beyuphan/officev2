@@ -11,9 +11,7 @@ import threading
 import time
 from pathlib import Path
 
-import sqlite_vec
-
-from ... import jobctl, models
+from ... import extras, jobctl, models
 
 DIM = 384  # paraphrase-multilingual-MiniLM-L12-v2
 TEXT_EXTS = {".txt", ".md", ".markdown", ".csv", ".log", ".json", ".yaml", ".yml", ".py", ".js", ".ts", ".html", ".rst"}
@@ -72,6 +70,7 @@ class Embedder:
 
     def _load(self):
         if self._model is None:
+            extras.require("documents")
             from fastembed import TextEmbedding
 
             cache = models.ensure(self._data_dir, "embed-multilingual")
@@ -88,6 +87,10 @@ class Index:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        extras.require("documents")
+        import sqlite_vec
+
+        self._sqlite_vec = sqlite_vec
         self._conn.enable_load_extension(True)
         sqlite_vec.load(self._conn)
         self._conn.enable_load_extension(False)
@@ -166,7 +169,7 @@ class Index:
                     "INSERT INTO chunks(doc_id, page, ord, text) VALUES (?,?,?,?)", (doc_id, page, ord_, text)
                 ).lastrowid
                 self._conn.execute(
-                    "INSERT INTO vec_chunks(rowid, embedding) VALUES (?, ?)", (cid, sqlite_vec.serialize_float32(vec))
+                    "INSERT INTO vec_chunks(rowid, embedding) VALUES (?, ?)", (cid, self._sqlite_vec.serialize_float32(vec))
                 )
             self._conn.commit()
         return len(pieces)
@@ -235,7 +238,7 @@ class Index:
         with self._lock:
             hits = self._conn.execute(
                 "SELECT rowid, distance FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-                (sqlite_vec.serialize_float32(qvec), max(k * 4 if per_document else k, k)),
+                (self._sqlite_vec.serialize_float32(qvec), max(k * 4 if per_document else k, k)),
             ).fetchall()
             out, seen = [], set()
             for h in hits:
@@ -259,3 +262,23 @@ def index_job(db_path: str, data_dir: str, paths: list[str]) -> dict:
         return idx.index_paths(paths)
     finally:
         idx.close()
+
+
+class LazyIndex:
+    """The document index, opened the first time it is needed (it requires an add-on)."""
+
+    def __init__(self, db_path: str | Path, data_dir: str):
+        self._args = (db_path, data_dir)
+        self._real: Index | None = None
+
+    def _get(self) -> Index:
+        if self._real is None:
+            self._real = Index(*self._args)
+        return self._real
+
+    def __getattr__(self, name: str):
+        return getattr(self._get(), name)
+
+    def close(self) -> None:
+        if self._real is not None:
+            self._real.close()
