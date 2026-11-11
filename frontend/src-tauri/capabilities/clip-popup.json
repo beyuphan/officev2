@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "clip-popup",
+  "description": "The clipboard list that opens with Ctrl+Shift+V",
+  "windows": [
+    "clip-popup"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close"
+  ]
+}

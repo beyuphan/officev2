@@ -25,7 +25,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$HOME/**"
+          "**"
         ]
       }
     }
@@ -39,6 +39,51 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
-  }
+    ],
+    "resources": [
+      "engine-dist/**/*"
+    ],
+    "shortDescription": "PDF and photo tools that run on your computer",
+    "longDescription": "Edit PDFs and photos, merge and convert files, and keep a clipboard history. Everything stays on your computer.",
+    "fileAssociations": [
+      {
+        "ext": [
+          "pdf"
+        ],
+        "name": "PDF document",
+        "description": "PDF document",
+        "role": "Editor",
+        "mimeType": "application/pdf"
+      },
+      {
+        "ext": [
+          "jpg",
+          "jpeg",
+          "png",
+          "webp",
+          "bmp",
+          "tif",
+          "tiff",
+          "gif",
+          "heic",
+          "avif"
+        ],
+        "name": "Picture",
+        "description": "Picture",
+        "role": "Editor"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "installer-hooks.nsh",
+        "languages": [
+          "English",
+          "Turkish"
+        ],
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "mainBinaryName": "officev2"
 }
