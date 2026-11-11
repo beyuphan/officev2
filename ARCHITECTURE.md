@@ -143,9 +143,10 @@ Downloads Autopilot, Bulk Renamer, System Cleaner, and Dev-Junk Sweeper are pres
 ## 12. Packaging
 
 - Tauri bundles the Rust shell and UI.
-- The Python sidecar is built into a self-contained executable (e.g. PyInstaller) with **only the core modules** (PDF, rules glue, Job Manager).
-- Heavy dependencies (ONNX runtimes, Whisper, LLM runtime, upscaler) are optional packs installed through the Model Manager.
-- ffmpeg is bundled; LibreOffice is detected and, if missing, the Office → PDF feature explains how to enable it.
+- The Python engine ships as a folder next to the app (`engine-dist/`, made by `scripts/build_engine.py`): the official embeddable Python for Windows with pip, uvicorn and the **core packages**. It is not frozen into one executable, so the optional add-ons (which are `pip install`ed on demand into that folder) work the same installed as in development. The installer is per-user, so the folder is writable.
+- The shell starts the engine from that folder and puts it and its worker processes in one Windows job object, so closing or restarting the engine ends all of them together.
+- Heavy dependencies (ONNX runtimes, Whisper, embeddings) are optional add-ons installed from the Add-ons screen.
+- ffmpeg is not bundled yet; LibreOffice is detected and, if missing, the Office → PDF feature explains how to enable it.
 - Updates via the Tauri updater; models and optional packs update independently.
 
 ## 13. Platform notes

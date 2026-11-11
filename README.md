@@ -1,166 +1,111 @@
 # officev2
 
-**A local-first desktop toolbox for PDFs, photos, files and on-device AI.**
-Everything runs on your own computer. No account, no cloud, no telemetry.
+**PDF and photo tools that run on your own computer.** Edit a PDF the way you edit a Word file, merge and split pages, convert files, fix a photo, and keep a clipboard history you can open from any program. No account, no cloud, no telemetry. Your files never leave your machine and your originals are never changed.
 
-[Türkçe](README-tr.md) · [Architecture](ARCHITECTURE.md) · [Design system](DESIGN.md)
-
-officev2 puts the tools people normally scatter across a dozen websites and apps into one window: a real PDF editor, a photo editor, bulk file tools, speech-to-text and document search that run offline. Your files never leave the machine, and nothing destroys your originals: every tool writes a **copy**, and every file operation can be **undone**.
+[Türkçe](README-tr.md) · [Architecture](ARCHITECTURE.md) · [Design notes](DESIGN.md)
 
 ![PDF editor](docs/screenshots/pdf-editor.png)
 
+## Download
+
+Get the installer from the [Releases](../../releases) page, run it, and you are done. Everything the app needs is inside; nothing is downloaded while you install. Windows 10 or 11 (64-bit).
+
+- It installs for the current user only, no administrator rights needed.
+- The installer is not code-signed, so Windows SmartScreen may say "unknown publisher". Choose *More info* and *Run anyway*.
+- Heavier extras (removing photo backgrounds, speech to text, searching your documents by meaning) are optional add-ons you install from inside the app when you want them.
+
+## What you can do
+
+| | |
+|---|---|
+| **PDF editor** | Open a PDF and click any text on a page to retype it. The background, pictures and drawings under it stay as they are. Drag text and pictures, delete a logo, add text, stamps, signatures, images, notes, links and form fields, highlight words, draw, black out private information for good, add page numbers, then save a copy. |
+| **Pages** | Add one or more PDFs and see every page as a tile. Drag to reorder, rotate, remove, duplicate, add blank pages, and click the scissors to cut the result into several files. |
+| **Convert** | Choose a file and it shows what it can become. A PDF: Word, text or Markdown, Excel tables, web page, pictures of the pages, smaller, fit a size limit, cut by size, repair, remove hidden information. A photo: another picture type, smaller, PDF. Word, Excel, PowerPoint and web pages: PDF. |
+| **Photo editor** | Crop, straighten, light and color, curves, filters with live thumbnails, text, shapes, blur a face or number plate, borders, QR codes, then save. Every change is a step you can remove. |
+| **Clipboard** | Press `Ctrl+Shift+V` in any program to open your last 100 copies (text, links, colors, images) next to the cursor and paste with Enter. It runs in the tray and can start with Windows. Anything a password manager marks as private is never recorded. |
+| **Right click** | *Edit with officev2* and *Convert with officev2* on PDFs and pictures. Several PDFs selected at once open in Pages. |
+| **More tools** | Redact by pattern (e-mail, IBAN, national id, phone, card), watermark, protect with a password, OCR for scans, compare two PDFs, clean up a scan, print layout, digital signature, batch jobs for whole folders, passport photos, social media sizes, collage and GIF, bulk rename, cleanup of junk and duplicates, Autopilot rules that sort your downloads, an encrypted vault. |
+
 <table>
 <tr>
-<td><img src="docs/screenshots/photo-editor.png" alt="Photo editor"></td>
-<td><img src="docs/screenshots/redact.png" alt="Redaction review"></td>
+<td><img src="docs/screenshots/pages.png" alt="Pages"></td>
+<td><img src="docs/screenshots/convert.png" alt="Convert"></td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/organize-pages.png" alt="Page manager"></td>
-<td><img src="docs/screenshots/photo-filters.png" alt="Photo filters"></td>
+<td><img src="docs/screenshots/photo-editor.png" alt="Photo editor"></td>
+<td><img src="docs/screenshots/autopilot.png" alt="Autopilot"></td>
 </tr>
 </table>
 
-## What it does
-
-### PDF
-
-| Tool | What you can do |
-|---|---|
-| **PDF editor** | Add text (any installed font, Turkish letters included), stamps (APPROVED, DRAFT, ...), images and signatures. Highlight, underline, strike through. Draw boxes, ovals, lines, arrows and freehand. Leave notes, add links. Erase or permanently black out content. Everything you place is a live object: click it to select, drag to move, pull the handles to resize or rotate, double-click text to retype it in place. The options of the selected item (or of the tool in use) sit in one bar above the page. Pages scroll one under another; thumbnails mark the pages you changed. Undo and redo, duplicate, copy and paste, arrow-key nudging. |
-| **Organize pages** | Every page is a tile: drag to reorder, rotate, duplicate, delete. A plain-language list says exactly what will change. |
-| **Merge, Extract pages** | Merge with a page-by-page result map; pick pages from a thumbnail grid or type a range. |
-| **Add and split** | Insert blank pages or pages from another PDF; split every N pages, before given pages, or at bookmarks. |
-| **Page numbers** | Headers, footers, page numbers and Bates numbers with tokens (`{n}`, `{n:04}`, `{total}`, `{file}`, `{date}`), live preview. |
-| **Page size** | Crop margins (manual or automatic) and fit pages onto A3/A4/A5/Letter/Legal. |
-| **Redact** | Search, review every match on its page, add your own boxes. The text underneath is removed from the file. |
-| **Watermark** | Text or image watermark with a live preview of each page. |
-| **Forms** | Fill form fields, optionally flatten. |
-| **Properties** | Edit title, author, keywords and the bookmark outline. |
-| **Export content** | Pages as PNG/JPG, pictures inside the PDF, text (txt, Markdown, JSON), pictures to PDF. |
-| **Protect, Convert, OCR** | AES-256 encryption and unlock (you must know the password), PDF to Word, Office to PDF, compress, metadata cleaner, OCR to a searchable PDF, flatten, grayscale. |
-
-### Photos and video
-
-| Tool | What you can do |
-|---|---|
-| **Photo editor** | Crop with aspect ratios, rotate, straighten, flip, resize. Exposure, brightness, contrast, highlights, shadows, warmth, tint, saturation, vibrance, hue, sharpness, auto-enhance. 17 filters with live thumbnails, vignette, film grain. Blur, pixelate or tilt-shift **a chosen area** (hide faces or number plates) or blur everything except the subject. Text with outline, shadow and label box; shapes, arrows, pen and marker; logo overlay; border and rounded corners; remove background. Text, shapes, logos and blur areas are live objects on the photo: click to select, drag, resize with handles, rotate, double-click text to retype. Whole-photo tools (crop, light, filters, border, size) sit in a short list of sections on the right. Every change is a step you can remove. Presets, hold-to-compare, undo and redo. |
-| **Batch** | Apply the same edits to a whole folder; convert, compress and strip metadata in bulk. |
-| **Video, Remove background, Upscale** | ffmpeg conversion, background removal, AI upscaling. |
-
-### Files, AI and everyday tools
-
-- **Files:** bulk rename with preview, cleanup of temp files, developer junk (`node_modules`, caches) and duplicates, disk map, and **Autopilot** rules that sort new downloads. Cleanup never deletes: it moves files to a quarantine folder you can restore from.
-- **Intelligence:** speech-to-text (Whisper), chat with and semantic search across your documents (local embeddings; written answers when Ollama is installed), a model manager.
-- **Desk:** clipboard history for text and images (password-manager entries are never recorded), color picker, pin an image above your windows, copy text from anywhere on screen.
-- **Vault:** an encrypted store (Argon2id + AES-256-GCM) with a recovery key.
-- **Tools:** Dev Lab (JWT, JSON, Base64, SQL, timestamps), clean paste for text copied from PDFs, a scratchpad.
-- **Everywhere:** a command palette (`Ctrl+K`), an Activity log with undo for every operation, progress bars and cancel for long jobs.
-
-## Using the editors
-
-Both editors work the same way: **pick a tool on the left, click or drag on the page, then click what you placed to change it.**
-
-| You want to | Do this |
-|---|---|
-| Add text | Pick **Text**, click where it goes and type. `Ctrl+Enter` or `Esc` finishes. (PDF: drag a box first to make the text wrap.) |
-| Change something you placed | Click it. Its options (font, size, color, width, opacity, link address...) appear in the bar above the page. |
-| Move, resize, rotate | Drag the item; drag its handles; drag the round handle to rotate (`Shift` snaps to 15°). |
-| Retype text | Double-click it, or select it and press `Enter`. |
-| Remove or copy | `Delete`, `Ctrl+D` (duplicate), `Ctrl+C` / `Ctrl+V`. Arrow keys nudge by 1 (`Shift`: 10). |
-| Undo | `Ctrl+Z`, redo with `Ctrl+Y`. A drag or a slider move is one step. |
-| Hide a face or plate (photo) | Pick **Blur area** and drag over it. Choose blur or pixelate in the bar. |
-| Black out text for good (PDF) | Pick **Redact** and drag over it. The text underneath is deleted on save. |
-| Switch tools quickly | `V` select, `T` text, `R` box, `O` oval, `A` arrow, `P` pen, `H` highlight / marker, `I` image, `N` note, `L` link, `E` erase, `X` redact, `B` blur area. `Esc` returns to Select. |
-
-PDF pages scroll one under another and the thumbnails jump to a page. In the photo editor, whole-photo tools (crop, light and color, filters, border, size and save) are the sections on the right.
+The interface is in Turkish and English (switch with TR / EN at the top) and follows the light or dark setting of Windows, or you can choose with the theme button.
 
 ## How it keeps your files safe
 
 - **Originals are never modified.** Tools save a copy and refuse to overwrite an existing file.
-- **Everything is undoable.** Created files move to a trash folder, moved or renamed files go back where they were, removed files sit in quarantine.
-- **The engine is private to the app.** The Python engine listens only on `127.0.0.1` on a random port, requires a per-session token, rejects foreign browser origins, and only touches folders inside your user profile.
-- **Nothing is downloaded behind your back.** Models download on first use; third-party programs (the upscaler) are never fetched automatically.
+- **Operations can be undone.** Created files move to a trash folder, moved or renamed files go back where they were, removed files sit in quarantine. See the Activity screen.
+- **The engine is private to the app.** The Python engine listens only on `127.0.0.1` on a random port, needs a per-session token and rejects foreign browser origins.
+- **Nothing is downloaded behind your back.** Models and add-ons download only when you ask for them, after telling you the size.
 
-## Requirements
+## Build it yourself
 
-- Windows 10/11 (the primary and only tested platform)
-- Python 3.12, Node.js 22, Rust (stable, MSVC build tools) and WebView2
-- Optional: ffmpeg (video, audio), LibreOffice (Office to PDF), Ollama (written answers for document chat)
+You need Windows 10/11, Python 3.12, Node.js 22, Rust (stable, with the MSVC build tools) and WebView2.
 
-## Run it
+Run from source:
 
 ```powershell
 git clone https://github.com/beyuphan/officev2.git
 cd officev2
 
-# 1. backend
 cd backend
 python -m venv venv
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
-cd ..
-
-# 2. app (starts the Python engine itself)
-cd frontend
+cd ..\frontend
 npm install
-npm run tauri dev
+npm run tauri dev          # starts the app, which starts the Python engine from backend\venv
 ```
 
-The desktop shell finds the engine at `backend/venv`. Set `LOCALFLOW_BACKEND_DIR` or `LOCALFLOW_PYTHON` to point elsewhere.
+Build the installer:
+
+```powershell
+python scripts\build_engine.py        # one time and whenever the backend changes: makes frontend\src-tauri\engine-dist (about 400 MB, downloads Python)
+cd frontend
+npm run tauri build -- --bundles nsis # result: frontend\src-tauri\target\release\bundle\nsis\
+```
 
 | Variable | Purpose |
 |---|---|
 | `LOCALFLOW_DATA_DIR` | Where settings, history, models and the vault live (default `%APPDATA%\officev2`) |
-| `LOCALFLOW_ALLOWED_ROOTS` | Folders the engine may read and write (default: your user profile) |
-| `LOCALFLOW_TOKEN` | Set by the shell; for a standalone engine use `LOCALFLOW_DEV_TOKEN` |
-
-Standalone engine for development:
-
-```powershell
-cd backend
-$env:LOCALFLOW_DEV_TOKEN = "dev"
-.\venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
-```
+| `LOCALFLOW_ALLOWED_ROOTS` | Folders the engine may read and write (default: your user folder and your drives) |
+| `LOCALFLOW_BACKEND_DIR`, `LOCALFLOW_PYTHON` | Use another engine folder or Python when running from source |
 
 ## Tests
 
 ```powershell
-cd backend;  .\venv\Scripts\python.exe -m pytest -m "not network"   # engine: 138 tests (141 with model downloads)
-cd frontend; npm test                                              # logic: 51 tests
-cd frontend; npm run test:e2e                                      # real engine + real UI in Edge: 65 checks
-cd frontend\src-tauri; cargo test --lib                            # clipboard store: 9 tests
+cd backend;  .\venv\Scripts\python.exe -m pytest -m "not network"   # the engine
+cd frontend; npm test                                              # the interface logic
+cd frontend; npm run test:e2e                                      # real engine and real interface in Edge
+cd frontend\src-tauri; cargo test --lib                            # the clipboard store
 ```
 
-The end-to-end suite drives the actual interface (file dialogs are mocked), saves real files and then opens them again to check the result: text that was added is searchable, redacted text is gone, a rotated page numbers upright, a cropped photo has the right size.
+`npm run test:e2e` drives the actual interface (file dialogs are mocked), saves real files and opens them again to check the result. `node e2e/walkthrough.mjs` walks through the app with mouse clicks and takes screenshots into `e2e/walk-shots`, for looking at it the way a person would.
 
 ## Project layout
 
 ```
 backend/    Python engine (FastAPI): PDF, photo, media, AI, files, vault, jobs, history
-frontend/   Tauri 2 shell (Rust) + React/TypeScript UI, end-to-end tests in e2e/
+frontend/   Tauri 2 shell (Rust) and React/TypeScript interface, end-to-end tests in e2e/
+scripts/    build_engine.py, which prepares the engine folder that goes into the installer
 docs/       Screenshots
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together.
+## Limits
 
-## Status and limits
-
-- Windows only so far. Clipboard, color picker, screen capture and Windows OCR are Windows-specific.
-- Run from source: the Python engine is not yet bundled into an installer.
-- The PDF editor **adds** content. It does not rewrite the existing text of a PDF. Image signatures work; cryptographic digital signatures are not implemented.
-- OCR uses Windows OCR when a language pack is installed (accurate for Turkish) and falls back to a bundled engine that drops Turkish diacritics.
-- The AI upscaler is a third-party program you install explicitly from the Models screen; it is not checksum-pinned yet.
-- Clipboard history is stored as plain data in a local database (not encrypted yet).
-- Screen text capture, pin-to-screen and the color picker are covered by unit tests and mocked commands, not by driving the real overlay windows.
-- Not built yet: LocalDrop (send files on the local network), the one-click local exposer, macOS and Linux.
-
-## Roadmap
-
-1. Installer with the engine bundled
-2. LocalDrop
-3. Encrypted clipboard history
-4. Real-window tests for the screen tools
-5. Semantic search over photos
+- Windows only for now. The clipboard window, screen tools and Windows OCR are Windows-specific.
+- Retyping text that is already in a PDF removes the old line and writes the new one in the closest installed font. It does not edit the original text objects.
+- Scanned pages have no text to click; run *Recognize text* (OCR) first.
+- Not built, to keep the app light: layers and brushes, AI inpainting, RAW and PSD files, PDF/A, PDF to PowerPoint, video tools.
+- Clipboard history is stored in a local database that is not encrypted yet.
 
 ## License
 
-No license has been chosen yet; all rights reserved for now.
+[GNU Affero General Public License v3.0](LICENSE). The PDF engine, PyMuPDF, is AGPL-licensed, so this project is too: you may use, change and share it freely, and anyone you give a modified version to (or let use it over a network) gets the source as well.

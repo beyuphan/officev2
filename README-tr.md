@@ -1,166 +1,111 @@
 # officev2
 
-**PDF, fotoğraf, dosya ve cihaz üstü yapay zeka için yerel öncelikli masaüstü araç kutusu.**
-Her şey kendi bilgisayarınızda çalışır. Hesap yok, bulut yok, veri toplama yok.
+**Kendi bilgisayarında çalışan PDF ve fotoğraf araçları.** Bir PDF'i Word dosyası gibi düzenle, sayfaları birleştir ve böl, dosyaları dönüştür, fotoğrafı düzelt ve her programdan açabileceğin bir pano geçmişi tut. Hesap yok, bulut yok, izleme yok. Dosyaların bilgisayarından çıkmaz ve orijinallerin asla değişmez.
 
-[English](README.md) · [Mimari](ARCHITECTURE.md) · [Tasarım sistemi](DESIGN.md)
+[English](README.md) · [Mimari](ARCHITECTURE.md) · [Tasarım notları](DESIGN.md)
 
-officev2, insanların normalde bir düzine web sitesi ve uygulamaya dağıttığı araçları tek pencerede toplar: gerçek bir PDF düzenleyici, fotoğraf düzenleyici, toplu dosya araçları, çevrimdışı çalışan ses yazıya dökme ve belge arama. Dosyalarınız makineden çıkmaz ve hiçbir şey orijinallerinizi bozmaz: her araç bir **kopya** yazar, her dosya işlemi **geri alınabilir**.
+![PDF editörü](docs/screenshots/pdf-editor.png)
 
-![PDF düzenleyici](docs/screenshots/pdf-editor.png)
+## İndir
+
+Kurulum dosyasını [Releases](../../releases) sayfasından indir, çalıştır, bitti. Uygulamanın ihtiyacı olan her şey içinde; kurulum sırasında hiçbir şey indirilmez. Windows 10 veya 11 (64 bit).
+
+- Yalnızca bulunduğun kullanıcı için kurulur, yönetici izni gerekmez.
+- Kurulum dosyası kod imzalı değil, bu yüzden Windows SmartScreen "bilinmeyen yayıncı" diyebilir. *Daha fazla bilgi* ve *Yine de çalıştır*'ı seç.
+- Ağır ekstralar (fotoğraf arka planı silme, konuşmayı yazıya çevirme, belgelerinde anlama göre arama) istediğinde uygulamanın içinden kurduğun isteğe bağlı eklentilerdir.
+
+## Neler yapabilirsin
+
+| | |
+|---|---|
+| **PDF editörü** | Bir PDF aç, sayfadaki herhangi bir yazıya tıklayıp yeniden yaz. Altındaki arka plan, resim ve çizimler olduğu gibi kalır. Yazıyı ve resimleri sürükle, logoyu sil, yazı, damga, imza, resim, not, bağlantı ve form alanı ekle, kelimeleri vurgula, çiz, özel bilgileri kalıcı olarak karart, sayfa numarası ekle, sonra bir kopya kaydet. |
+| **Sayfalar** | Bir ya da birkaç PDF ekle, her sayfa bir kutucuk olarak görünür. Sürükleyerek sırala, döndür, kaldır, çoğalt, boş sayfa ekle, makasa tıklayıp sonucu birkaç dosyaya böl. |
+| **Dönüştür** | Bir dosya seç, neye dönüşebileceğini göstersin. PDF için: Word, yazı ya da Markdown, Excel tabloları, web sayfası, sayfa resimleri, küçültme, boyut sınırına sığdırma, boyuta göre bölme, onarma, gizli bilgileri silme. Fotoğraf için: başka resim türü, küçültme, PDF. Word, Excel, PowerPoint ve web sayfaları için: PDF. |
+| **Fotoğraf editörü** | Kırp, düzelt, ışık ve renk, eğriler, canlı önizlemeli filtreler, yazı, şekiller, yüz ya da plaka bulanıklaştırma, çerçeve, QR kod, sonra kaydet. Her değişiklik kaldırabileceğin bir adımdır. |
+| **Pano** | Herhangi bir programdayken `Ctrl+Shift+V`'ye bas, son 100 kopyan (yazı, bağlantı, renk, resim) imlecin yanında açılır, Enter ile yapıştır. Tepside çalışır ve Windows ile başlayabilir. Parola yöneticisinin gizli işaretlediği hiçbir şey kaydedilmez. |
+| **Sağ tık** | PDF ve resimlerde *officev2 ile düzenle* ve *officev2 ile dönüştür*. Birden çok PDF seçince Sayfalar'da açılır. |
+| **Diğer araçlar** | Kalıpla karartma (e-posta, IBAN, TC kimlik, telefon, kart), filigran, parola koruması, tarama için OCR, iki PDF'i karşılaştırma, taramayı temizleme, baskı düzeni, dijital imza, klasör başına toplu işler, vesikalık, sosyal medya boyutları, kolaj ve GIF, toplu yeniden adlandırma, çöp ve kopya temizliği, indirdiklerini ayıran Otopilot kuralları, şifreli kasa. |
 
 <table>
 <tr>
-<td><img src="docs/screenshots/photo-editor.png" alt="Fotoğraf düzenleyici"></td>
-<td><img src="docs/screenshots/redact.png" alt="Karartma incelemesi"></td>
+<td><img src="docs/screenshots/pages.png" alt="Sayfalar"></td>
+<td><img src="docs/screenshots/convert.png" alt="Dönüştür"></td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/organize-pages.png" alt="Sayfa yöneticisi"></td>
-<td><img src="docs/screenshots/photo-filters.png" alt="Fotoğraf filtreleri"></td>
+<td><img src="docs/screenshots/photo-editor.png" alt="Fotoğraf editörü"></td>
+<td><img src="docs/screenshots/autopilot.png" alt="Otopilot"></td>
 </tr>
 </table>
 
-## Neler yapabilir
+Arayüz Türkçe ve İngilizce (üstteki TR / EN ile değişir), Windows'un açık ya da koyu ayarını izler; tema düğmesiyle de seçebilirsin.
 
-### PDF
+## Dosyalarını nasıl korur
 
-| Araç | Yapabilecekleriniz |
-|---|---|
-| **PDF düzenleyici** | Yazı ekleme (yüklü her yazı tipi, Türkçe harfler dahil), damgalar (ONAYLANDI, TASLAK vb.), görsel ve imza ekleme. Vurgulama, altını çizme, üstünü çizme. Kutu, oval, çizgi, ok ve serbest çizim. Not bırakma, bağlantı ekleme. İçeriği silme veya kalıcı olarak karartma. Yerleştirdiğiniz her şey canlı bir nesnedir: tıklayarak seçin, sürükleyerek taşıyın, tutamaçlarla boyutlandırın veya döndürün, yazıya çift tıklayarak yerinde düzenleyin. Seçili nesnenin (veya kullandığınız aracın) ayarları sayfanın üstündeki tek bir çubukta durur. Sayfalar alt alta kayar; küçük resimler değiştirdiğiniz sayfaları işaretler. Geri al / yinele, çoğaltma, kopyala-yapıştır, ok tuşlarıyla kaydırma. |
-| **Sayfaları düzenle** | Her sayfa bir karo: sürükleyerek sırala, döndür, çoğalt, sil. Sade dille yazılmış bir liste tam olarak neyin değişeceğini söyler. |
-| **Birleştir, Sayfa ayıkla** | Sayfa sayfa sonuç haritasıyla birleştirme; küçük resim ızgarasından sayfa seçme veya aralık yazma. |
-| **Ekle ve böl** | Boş sayfa veya başka bir PDF'ten sayfa ekleme; her N sayfada, belirli sayfalardan önce veya yer imlerinde bölme. |
-| **Sayfa numaraları** | Üstbilgi, altbilgi, sayfa numarası ve Bates numarası (`{n}`, `{n:04}`, `{total}`, `{file}`, `{date}`), canlı önizleme. |
-| **Sayfa boyutu** | Kenar boşluklarını kırpma (elle veya otomatik), sayfaları A3/A4/A5/Letter/Legal kâğıda sığdırma. |
-| **Karart** | Ara, her eşleşmeyi kendi sayfasında incele, kendi kutularınızı ekleyin. Altındaki metin dosyadan silinir. |
-| **Filigran** | Her sayfanın canlı önizlemesiyle metin veya görsel filigran. |
-| **Formlar** | Form alanlarını doldurma, isteğe bağlı düzleştirme. |
-| **Özellikler** | Başlık, yazar, anahtar kelimeler ve yer imi ana hattını düzenleme. |
-| **İçerik çıkar** | Sayfaları PNG/JPG olarak, PDF içindeki resimleri, metni (txt, Markdown, JSON), resimlerden PDF. |
-| **Koru, Dönüştür, OCR** | AES-256 şifreleme ve kilit açma (parolayı bilmelisiniz), PDF→Word, Office→PDF, sıkıştırma, metadata temizleyici, aranabilir PDF için OCR, düzleştirme, gri tonlama. |
+- **Orijinaller asla değişmez.** Araçlar bir kopya kaydeder ve var olan dosyanın üzerine yazmaz.
+- **İşlemler geri alınabilir.** Oluşturulan dosyalar çöp klasörüne taşınır, taşınan ya da adı değişen dosyalar yerine döner, kaldırılanlar karantinada bekler. Etkinlik ekranına bak.
+- **Motor yalnızca uygulamaya aittir.** Python motoru yalnızca `127.0.0.1`'de rastgele bir portta dinler, oturuma özel jeton ister ve yabancı tarayıcı kaynaklarını reddeder.
+- **Arkandan hiçbir şey indirilmez.** Modeller ve eklentiler yalnızca sen isteyince, boyutu söylendikten sonra iner.
 
-### Fotoğraf ve video
+## Kendin derle
 
-| Araç | Yapabilecekleriniz |
-|---|---|
-| **Fotoğraf düzenleyici** | Oranlı kırpma, döndürme, düzleştirme, çevirme, yeniden boyutlandırma. Pozlama, parlaklık, kontrast, parlak/koyu tonlar, sıcaklık, renk tonu, doygunluk, canlılık, renk dönüşü, keskinlik, otomatik iyileştirme. Canlı küçük resimli 17 filtre, vinyet, film greni. **Seçtiğiniz bir alanı** bulanıklaştırma, mozaikleme veya tilt-shift (yüz ya da plaka gizleme) ya da konu dışındaki her şeyi bulanıklaştırma. Çerçeveli/gölgeli yazı, şekil, ok, kalem ve fosforlu kalem, logo ekleme, kenarlık, yuvarlak köşe, arka plan silme. Yazı, şekil, logo ve bulanık alanlar fotoğraf üzerinde canlı nesnelerdir: tıklayıp seçin, sürükleyin, tutamaçlarla boyutlandırın, döndürün, yazıya çift tıklayıp düzenleyin. Tüm fotoğrafa uygulanan araçlar (kırpma, ışık, filtre, kenarlık, boyut) sağda kısa bir bölüm listesindedir. Her değişiklik kaldırılabilen bir adımdır. Hazır ayarlar, basılı tutup karşılaştırma, geri al / yinele. |
-| **Toplu işlem** | Aynı düzenlemeleri bir klasördeki tüm fotoğraflara uygulama; toplu dönüştürme, sıkıştırma ve metadata silme. |
-| **Video, Arka plan silme, Büyütme** | ffmpeg dönüştürme, arka plan silme, yapay zeka ile büyütme. |
+Windows 10/11, Python 3.12, Node.js 22, Rust (kararlı sürüm, MSVC derleme araçlarıyla) ve WebView2 gerekir.
 
-### Dosyalar, yapay zeka ve günlük araçlar
-
-- **Dosyalar:** önizlemeli toplu yeniden adlandırma; geçici dosya, geliştirici çöpü (`node_modules`, önbellekler) ve yinelenen dosya temizliği; disk haritası; yeni indirmeleri ayıklayan **Otopilot** kuralları. Temizlik hiçbir şeyi silmez: dosyaları geri yükleyebileceğiniz bir karantina klasörüne taşır.
-- **Zeka:** ses yazıya dökme (Whisper), belgelerinizle sohbet ve anlamsal arama (yerel gömme modeli; Ollama kuruluysa yazılı yanıt), model yöneticisi.
-- **Masa:** metin ve görsel için pano geçmişi (parola yöneticisi girdileri asla kaydedilmez), renk damlalığı, bir görseli pencerelerin üstüne iğneleme, ekranda her yerden metin kopyalama.
-- **Kasa:** kurtarma anahtarlı şifreli depo (Argon2id + AES-256-GCM).
-- **Araçlar:** Dev Lab (JWT, JSON, Base64, SQL, zaman damgası), PDF'ten kopyalanan metin için temiz yapıştır, karalama defteri.
-- **Her yerde:** komut paleti (`Ctrl+K`), her işlem için geri alma özellikli Etkinlik günlüğü, uzun işler için ilerleme çubuğu ve iptal.
-
-## Düzenleyicileri kullanma
-
-İki düzenleyici de aynı çalışır: **soldan bir araç seçin, sayfada tıklayın veya sürükleyin, sonra yerleştirdiğinize tıklayıp değiştirin.**
-
-| Yapmak istediğiniz | Nasıl |
-|---|---|
-| Yazı eklemek | **Text** aracını seçin, yazının geleceği yere tıklayıp yazın. `Ctrl+Enter` veya `Esc` bitirir. (PDF: yazının satır kırması için önce kutu sürükleyin.) |
-| Yerleştirdiğinizi değiştirmek | Üzerine tıklayın. Ayarları (yazı tipi, boyut, renk, kalınlık, opaklık, bağlantı adresi...) sayfanın üstündeki çubukta çıkar. |
-| Taşıma, boyutlandırma, döndürme | Nesneyi sürükleyin; tutamaçlarını sürükleyin; yuvarlak tutamaçla döndürün (`Shift` 15°'ye yaslar). |
-| Yazıyı yeniden yazmak | Çift tıklayın veya seçip `Enter`'a basın. |
-| Silmek veya kopyalamak | `Delete`, `Ctrl+D` (çoğalt), `Ctrl+C` / `Ctrl+V`. Ok tuşları 1 birim kaydırır (`Shift`: 10). |
-| Geri almak | `Ctrl+Z`, yinelemek `Ctrl+Y`. Bir sürükleme veya kaydırıcı hareketi tek adımdır. |
-| Yüz veya plaka gizlemek (fotoğraf) | **Blur area** aracını seçip üzerine sürükleyin. Bulanıklık veya mozaiği çubuktan seçin. |
-| Metni kalıcı karartmak (PDF) | **Redact** aracını seçip üzerine sürükleyin. Alttaki metin kaydederken silinir. |
-| Araç değiştirmek | `V` seç, `T` yazı, `R` kutu, `O` oval, `A` ok, `P` kalem, `H` vurgu / fosforlu, `I` görsel, `N` not, `L` bağlantı, `E` sil, `X` karart, `B` bulanık alan. `Esc` Seç'e döner. |
-
-PDF sayfaları alt alta kayar, küçük resimler sayfaya götürür. Fotoğraf düzenleyicide tüm fotoğrafa uygulanan araçlar (kırpma, ışık ve renk, filtreler, kenarlık, boyut ve kaydet) sağdaki bölümlerdir.
-
-## Dosyalarınızı nasıl korur
-
-- **Orijinaller asla değiştirilmez.** Araçlar kopya kaydeder ve var olan bir dosyanın üzerine yazmayı reddeder.
-- **Her şey geri alınabilir.** Oluşturulan dosyalar çöp klasörüne gider, taşınan veya yeniden adlandırılan dosyalar eski yerine döner, kaldırılanlar karantinada bekler.
-- **Motor uygulamaya özeldir.** Python motoru yalnızca `127.0.0.1` üzerinde rastgele bir portta dinler, oturum başına token ister, yabancı tarayıcı kaynaklarını reddeder ve yalnızca kullanıcı profilinizdeki klasörlere dokunur.
-- **Arkanızdan hiçbir şey indirilmez.** Modeller ilk kullanımda iner; üçüncü taraf programlar (büyütücü) otomatik indirilmez.
-
-## Gereksinimler
-
-- Windows 10/11 (birincil ve tek test edilen platform)
-- Python 3.12, Node.js 22, Rust (kararlı sürüm, MSVC derleme araçları) ve WebView2
-- İsteğe bağlı: ffmpeg (video, ses), LibreOffice (Office→PDF), Ollama (belge sohbetinde yazılı yanıt)
-
-## Çalıştırma
+Kaynaktan çalıştır:
 
 ```powershell
 git clone https://github.com/beyuphan/officev2.git
 cd officev2
 
-# 1. arka uç
 cd backend
 python -m venv venv
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
-cd ..
-
-# 2. uygulama (Python motorunu kendisi başlatır)
-cd frontend
+cd ..\frontend
 npm install
-npm run tauri dev
+npm run tauri dev          # uygulamayı açar, o da Python motorunu backend\venv'den başlatır
 ```
 
-Masaüstü kabuğu motoru `backend/venv` içinde bulur. Başka yere işaret etmek için `LOCALFLOW_BACKEND_DIR` veya `LOCALFLOW_PYTHON` ayarlayın.
-
-| Değişken | Amacı |
-|---|---|
-| `LOCALFLOW_DATA_DIR` | Ayarların, geçmişin, modellerin ve kasanın yeri (varsayılan `%APPDATA%\officev2`) |
-| `LOCALFLOW_ALLOWED_ROOTS` | Motorun okuyup yazabileceği klasörler (varsayılan: kullanıcı profiliniz) |
-| `LOCALFLOW_TOKEN` | Kabuk tarafından ayarlanır; bağımsız motor için `LOCALFLOW_DEV_TOKEN` kullanın |
-
-Geliştirme için bağımsız motor:
+Kurulum dosyasını üret:
 
 ```powershell
-cd backend
-$env:LOCALFLOW_DEV_TOKEN = "dev"
-.\venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+python scripts\build_engine.py        # bir kez ve backend değiştikçe: frontend\src-tauri\engine-dist'i yapar (yaklaşık 400 MB, Python'u indirir)
+cd frontend
+npm run tauri build -- --bundles nsis # sonuç: frontend\src-tauri\target\release\bundle\nsis\
 ```
+
+| Değişken | Ne işe yarar |
+|---|---|
+| `LOCALFLOW_DATA_DIR` | Ayarların, geçmişin, modellerin ve kasanın durduğu yer (varsayılan `%APPDATA%\officev2`) |
+| `LOCALFLOW_ALLOWED_ROOTS` | Motorun okuyup yazabildiği klasörler (varsayılan: kullanıcı klasörün ve sürücülerin) |
+| `LOCALFLOW_BACKEND_DIR`, `LOCALFLOW_PYTHON` | Kaynaktan çalışırken başka bir motor klasörü ya da Python kullan |
 
 ## Testler
 
 ```powershell
-cd backend;  .\venv\Scripts\python.exe -m pytest -m "not network"   # motor: 138 test (model indirenlerle 141)
-cd frontend; npm test                                              # mantık: 51 test
-cd frontend; npm run test:e2e                                      # gerçek motor + gerçek arayüz (Edge): 65 kontrol
-cd frontend\src-tauri; cargo test --lib                            # pano deposu: 9 test
+cd backend;  .\venv\Scripts\python.exe -m pytest -m "not network"   # motor
+cd frontend; npm test                                              # arayüz mantığı
+cd frontend; npm run test:e2e                                      # gerçek motor ve gerçek arayüz, Edge'de
+cd frontend\src-tauri; cargo test --lib                            # pano deposu
 ```
 
-Uçtan uca paket gerçek arayüzü sürer (dosya pencereleri taklit edilir), gerçek dosyalar kaydeder ve sonucu kontrol etmek için onları yeniden açar: eklenen metin aranabilir, karartılan metin gitmiştir, döndürülmüş sayfada numara dik durur, kırpılan fotoğraf doğru boyuttadır.
+`npm run test:e2e` gerçek arayüzü sürer (dosya pencereleri taklit edilir), gerçek dosyalar kaydeder ve sonucu kontrol etmek için tekrar açar. `node e2e/walkthrough.mjs` uygulamayı fare tıklamalarıyla gezer ve `e2e/walk-shots` içine ekran görüntüsü alır; bir kullanıcı gibi bakmak içindir.
 
-## Proje yapısı
+## Klasörler
 
 ```
-backend/    Python motoru (FastAPI): PDF, fotoğraf, medya, yapay zeka, dosyalar, kasa, işler, geçmiş
-frontend/   Tauri 2 kabuğu (Rust) + React/TypeScript arayüzü, uçtan uca testler e2e/ içinde
+backend/    Python motoru (FastAPI): PDF, fotoğraf, medya, yapay zekâ, dosyalar, kasa, işler, geçmiş
+frontend/   Tauri 2 kabuğu (Rust) ve React/TypeScript arayüzü, uçtan uca testler e2e/ içinde
+scripts/    build_engine.py: kurulum dosyasına giren motor klasörünü hazırlar
 docs/       Ekran görüntüleri
 ```
 
-Parçaların nasıl birleştiği için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasına bakın.
+## Sınırlar
 
-## Durum ve sınırlar
-
-- Şimdilik yalnızca Windows. Pano, renk damlalığı, ekran yakalama ve Windows OCR Windows'a özeldir.
-- Kaynaktan çalışır: Python motoru henüz bir yükleyiciye paketlenmedi.
-- PDF düzenleyici içerik **ekler**; bir PDF'in mevcut metnini yeniden yazmaz. Görsel imza çalışır; kriptografik dijital imza yoktur.
-- OCR, dil paketi kuruluysa Windows OCR'ı kullanır (Türkçede doğru), yoksa Türkçe aksanlı harfleri düşüren paketli motora döner.
-- Yapay zeka büyütücü, Modeller ekranından açıkça kurduğunuz üçüncü taraf bir programdır; henüz sağlama toplamıyla sabitlenmedi.
-- Pano geçmişi yerel bir veritabanında düz veri olarak saklanır (henüz şifreli değil).
-- Ekran metni yakalama, ekrana iğneleme ve renk damlalığı birim testleri ve taklit edilmiş komutlarla doğrulandı; gerçek overlay pencereleri sürülerek test edilmedi.
-- Henüz yok: LocalDrop (yerel ağda dosya gönderme), tek tıkla yerel proje açma, macOS ve Linux.
-
-## Yol haritası
-
-1. Motoru içeren yükleyici
-2. LocalDrop
-3. Şifreli pano geçmişi
-4. Ekran araçları için gerçek pencere testleri
-5. Fotoğraflarda anlamsal arama
+- Şimdilik yalnızca Windows. Pano penceresi, ekran araçları ve Windows OCR'ı Windows'a özeldir.
+- PDF'te var olan bir yazıyı yeniden yazmak eski satırı siler ve yenisini en yakın kurulu yazı tipiyle yazar. Özgün yazı nesnelerini düzenlemez.
+- Taranmış sayfalarda tıklanacak yazı yoktur; önce *Recognize text* (OCR) çalıştır.
+- Uygulamayı hafif tutmak için yapılmadı: katmanlar ve fırçalar, yapay zekâlı silme, RAW ve PSD, PDF/A, PDF'ten PowerPoint'e, video araçları.
+- Pano geçmişi henüz şifrelenmemiş yerel bir veritabanında durur.
 
 ## Lisans
 
-Henüz lisans seçilmedi; şimdilik tüm haklar saklıdır.
+[GNU Affero Genel Kamu Lisansı v3.0](LICENSE). PDF motoru PyMuPDF AGPL lisanslı, bu yüzden bu proje de öyle: serbestçe kullanabilir, değiştirebilir ve paylaşabilirsin; değiştirilmiş bir sürümü verdiğin (ya da ağ üzerinden kullandırdığın) herkes kaynağını da alır.
