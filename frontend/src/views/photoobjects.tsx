@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as RPointerEvent } from "react";
 import { Circle, Copy, Droplet, Highlighter, ImagePlus, Minus, MousePointer2, MoveUpRight, PenLine, Square, Trash2, Type as TypeIcon, type LucideIcon } from "lucide-react";
 import { Handles, type HandleId } from "./pdfitems";
+import { FontPicker } from "../shared";
 import type { Item, Op } from "../lib/photoOps";
 import { spanRect } from "../lib/crop";
 
@@ -125,7 +126,9 @@ export type LayerProps = {
   onEdit: (id: number | null) => void;
   patch: (id: number, change: Partial<Op>) => void;
   touch: () => void;
-  place: (op: Op, opts?: { edit?: boolean; keepTool?: boolean }) => void;
+  place: (op: Op, opts?: { edit?: boolean; keepTool?: boolean; stay?: boolean }) => void;
+  /** ids the engine's picture already shows; text not in here yet is drawn by the browser meanwhile */
+  drawn: Set<number>;
   onText: (id: number, text: string) => void;
   onCommit: (id: number) => void;
 };
@@ -156,13 +159,8 @@ export function ObjectLayer(p: LayerProps) {
 
   function onItemDown(e: RPointerEvent, it: Item) {
     if (e.button !== 0) return;
-    if (p.tool === "text" && it.type === "text") {
-      e.stopPropagation();
-      p.onSelect(it.id);
-      p.onEdit(it.id);
-      return;
-    }
-    if (p.tool !== "select") return;
+    const textClick = p.tool === "text" && it.type === "text"; // in the text tool a click retypes, a drag moves
+    if (p.tool !== "select" && !textClick) return;
     e.stopPropagation();
     e.preventDefault();
     dropFocus();
@@ -181,7 +179,9 @@ export function ObjectLayer(p: LayerProps) {
         const cur = p.itemsRef.current.find((x) => x.id === it.id);
         if (cur) p.patch(it.id, movedBy(cur, dx, dy));
       },
-      () => undefined,
+      () => {
+        if (textClick && !moved) p.onEdit(it.id);
+      },
     );
   }
 
@@ -259,7 +259,7 @@ export function ObjectLayer(p: LayerProps) {
     const big = r.w > 0.012 && r.h > 0.012;
     switch (t) {
       case "text":
-        p.place({ type: "text", text: "", font: d.font, size: d.size, bold: d.bold, italic: d.italic, color: d.color, opacity: d.opacity, rotation: 0, x: a.x, y: a.y, stroke_width: d.outline, stroke_color: d.outlineColor, shadow: d.shadow, ...(d.box ? { background: d.boxColor } : {}) }, { edit: true });
+        p.place({ type: "text", text: "", font: d.font, size: d.size, bold: d.bold, italic: d.italic, color: d.color, opacity: d.opacity, rotation: 0, x: a.x, y: a.y, stroke_width: d.outline, stroke_color: d.outlineColor, shadow: d.shadow, ...(d.box ? { background: d.boxColor } : {}) }, { edit: true, stay: true });
         return;
       case "image":
         p.place({ type: "overlay", path: "", x: a.x, y: a.y, w: moved && big ? r.w : 0.22, opacity: 1, rotation: 0 });
@@ -317,22 +317,20 @@ export function ObjectLayer(p: LayerProps) {
             <Handles ids={[i === 0 ? "p0" : "p1"]} onStart={(id, e) => onHandle(sel, id, e)} />
           </div>
         ))}
+      {p.items
+        .filter((it) => it.type === "text" && it.id !== p.editing && !p.drawn.has(it.id) && String(it.text ?? "").trim())
+        .map((it) => (
+          <TextGhost key={`g${it.id}`} it={it} basis={p.basis} />
+        ))}
       {editingItem && <TextEditor it={editingItem} basis={p.basis} onText={p.onText} onCommit={p.onCommit} />}
     </div>
   );
 }
 
-function TextEditor({ it, basis, onText, onCommit }: { it: Item; basis: Basis; onText: (id: number, t: string) => void; onCommit: (id: number) => void }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const born = useRef(Date.now());
-  const leaving = useRef(false);
-  useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
-  }, []);
+function textStyle(it: Item, basis: Basis): CSSProperties {
   const size = num(it.size, 48);
   const stroke = num(it.stroke_width);
-  const style: CSSProperties = {
+  return {
     left: `${num(it.x, 0.5) * 100}%`,
     top: `${num(it.y, 0.5) * 100}%`,
     transform: `translate(-50%, -50%)${num(it.rotation) ? ` rotate(${num(it.rotation)}deg)` : ""}`,
@@ -350,6 +348,26 @@ function TextEditor({ it, basis, onText, onCommit }: { it: Item; basis: Basis; o
     textShadow: it.shadow ? `${(size * 0.06) / basis.w * 100}cqw ${(size * 0.06) / basis.w * 100}cqw 0 rgb(0 0 0 / 0.6)` : undefined,
     fieldSizing: "content",
   } as CSSProperties;
+}
+
+/** The text as the page will show it, drawn by the browser until the engine's picture catches up. */
+function TextGhost({ it, basis }: { it: Item; basis: Basis }) {
+  return (
+    <div className="pghost" aria-hidden style={{ ...textStyle(it, basis), whiteSpace: "pre", pointerEvents: "none" }}>
+      {String(it.text ?? "")}
+    </div>
+  );
+}
+
+function TextEditor({ it, basis, onText, onCommit }: { it: Item; basis: Basis; onText: (id: number, t: string) => void; onCommit: (id: number) => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const born = useRef(Date.now());
+  const leaving = useRef(false);
+  useEffect(() => {
+    ref.current?.focus();
+    ref.current?.select();
+  }, []);
+  const style = textStyle(it, basis);
   return (
     <textarea
       ref={ref}
@@ -405,6 +423,16 @@ const BLUR_KINDS = [
   { id: "pixelate", label: "Pixelate" },
 ];
 
+/** The look of an object (not where it is), so it can be copied onto another one of the same kind. */
+export function styleOf(it: Item): { kind: string; style: Partial<Op> } | null {
+  const pick = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, it[k]]));
+  if (it.type === "text") return { kind: "text", style: pick(["font", "size", "bold", "italic", "color", "opacity", "stroke_width", "stroke_color", "shadow", "background"]) };
+  if (it.type === "shape") return { kind: "shape", style: pick(["color", "width", "opacity", "fill"]) };
+  if (it.type === "blur") return { kind: "blur", style: pick(["kind", "radius", "feather", "invert"]) };
+  if (it.type === "overlay") return { kind: "overlay", style: pick(["opacity"]) };
+  return null;
+}
+
 export type BarProps = {
   tool: PTool;
   hint: string;
@@ -412,6 +440,7 @@ export type BarProps = {
   defs: Defs;
   setDefs: (f: (d: Defs) => Defs) => void;
   fonts: string[];
+  onFonts: (all: string[]) => void;
   maxSide: number;
   hasImage: boolean;
   patch: (id: number, c: Partial<Op>) => void;
@@ -419,10 +448,13 @@ export type BarProps = {
   onDelete: () => void;
   onDuplicate: () => void;
   onPickImage: () => void;
+  hasStyle: boolean;
+  onCopyStyle: () => void;
+  onPasteStyle: () => void;
 };
 
 /** Options of whatever is selected, or of the tool in use. */
-export function PhotoBar({ tool, hint, sel, defs, setDefs, fonts, maxSide, hasImage, patch, touch, onDelete, onDuplicate, onPickImage }: BarProps) {
+export function PhotoBar({ tool, hint, sel, defs, setDefs, fonts, onFonts, maxSide, hasImage, patch, touch, onDelete, onDuplicate, onPickImage, hasStyle, onCopyStyle, onPasteStyle }: BarProps) {
   const kind: PTool | "overlay" = sel ? (sel.type === "text" ? "text" : sel.type === "overlay" ? "image" : sel.type === "blur" ? "blur" : (String(sel.kind) as PTool)) : tool;
   const isText = kind === "text";
   const isShape = ["rect", "ellipse", "line", "arrow", "path", "highlighter"].includes(kind);
@@ -451,11 +483,7 @@ export function PhotoBar({ tool, hint, sel, defs, setDefs, fonts, maxSide, hasIm
 
       {isText && (
         <>
-          <select aria-label="Font" value={font} onChange={(e) => set("font", "font", e.target.value)}>
-            {(fonts.includes(font) ? fonts : [font, ...fonts]).map((f) => (
-              <option key={f}>{f}</option>
-            ))}
-          </select>
+          <FontPicker value={font} fonts={fonts} onChange={(f) => set("font", "font", f)} onFonts={onFonts} />
           <span className="stepper">
             <button className="icon" aria-label="Smaller" onClick={() => set("size", "size", Math.max(6, Math.round(size * 0.92)))}>−</button>
             <input aria-label="Size" type="number" min={6} max={maxSide} value={size} onChange={(e) => e.target.value && set("size", "size", Math.min(maxSide, Math.max(6, Number(e.target.value))))} />
@@ -524,6 +552,8 @@ export function PhotoBar({ tool, hint, sel, defs, setDefs, fonts, maxSide, hasIm
       <span className="spacer" />
       {sel && (
         <>
+          <button onClick={onCopyStyle} title="Copy how this looks (Ctrl+Shift+C)">Copy style</button>
+          <button onClick={onPasteStyle} disabled={!hasStyle} title="Give the copied look to this one (Ctrl+Shift+V)">Paste style</button>
           <button onClick={onDuplicate} title="Duplicate (Ctrl+D)"><Copy size={15} strokeWidth={1.5} aria-hidden /> Duplicate</button>
           <button className="danger" onClick={onDelete} title="Delete (Del)"><Trash2 size={15} strokeWidth={1.5} aria-hidden /> Delete</button>
         </>

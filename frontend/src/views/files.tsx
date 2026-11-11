@@ -1,3 +1,5 @@
+import { failed } from "../lib/notify";
+import { buildPresets, describeRule, type Folders, type Preset } from "../lib/autopilot";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { del, get, post, put, runJob, type Job } from "../api";
 import {
@@ -154,7 +156,7 @@ export function Cleanup({ onDone }: { onDone: () => void }) {
   const [confirmPurge, setConfirmPurge] = useState(false);
 
   const loadBatches = useCallback(() => {
-    get<Batch[]>("/files/quarantine").then(setBatches).catch(() => undefined);
+    get<Batch[]>("/files/quarantine").then(setBatches).catch(failed("Could not load the quarantine list"));
   }, []);
   useEffect(loadBatches, [loadBatches]);
 
@@ -450,9 +452,13 @@ export function Autopilot({ onDone }: { onDone: () => void }) {
   const [dest, setDest] = useState<string | null>(null);
   const [byType, setByType] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [folders, setFolders] = useState<Folders | null>(null);
+  useEffect(() => {
+    get<Folders>("/files/known-folders").then(setFolders).catch(failed("Could not find your folders"));
+  }, []);
 
   const load = useCallback(() => {
-    get<Rule[]>("/files/rules").then(setRules).catch(() => undefined);
+    get<Rule[]>("/files/rules").then(setRules).catch(failed("Could not load your rules"));
   }, []);
   useEffect(load, [load]);
 
@@ -493,45 +499,66 @@ export function Autopilot({ onDone }: { onDone: () => void }) {
     }
   }
 
+  const presets = folders ? buildPresets(folders) : [];
+  const draft = { folder: folder ?? "", extensions: exts.split(",").map((e) => e.trim().replace(/^\./, "")).filter(Boolean), name_regex: regex, min_size: Math.round(Number(minKb) * 1024) || 0, dest: byType && dest ? `${dest}\\{ext}` : dest ?? "" };
+
+  async function turnOn(pr: Preset) {
+    try {
+      await post("/files/rules", pr.rule);
+      setMessage({ ok: true, text: `Turned on: ${describeRule(pr.rule)} New files are moved by themselves. To tidy what is already there, press \u201cMove what is there now\u201d.` });
+      load();
+    } catch (e) {
+      setMessage({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   return (
     <>
       <Title
         title="Autopilot"
-        hint="Rules that file things away for you. A rule watches a folder and moves matching files, once downloads have finished. Every move can be undone."
+        hint={"Files that land in a folder (usually Downloads) are put away for you. Example: “When a PNG lands in Downloads, move it to Pictures › PNG.” Pick a ready-made rule below, or write your own. Every move can be undone in Activity."}
       />
+
+      <h2>Ready-made rules</h2>
+      <div className="ap-cards">
+        {presets.map((pr) => {
+          const on = rules.some((r) => r.name === pr.rule.name);
+          return (
+            <div key={pr.id} className={`ap-card${on ? " on" : ""}`}>
+              <b>{pr.title}</b>
+              <small>{pr.example}</small>
+              <button className={on ? "" : "primary"} disabled={on} onClick={() => void turnOn(pr)}>
+                {on ? "Turned on" : "Turn on"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <Message m={message} />
+
+      <h2>Your rules</h2>
       <Table
         head={
           <tr>
-            <th>Rule</th>
-            <th>Watches</th>
-            <th>Moves to</th>
-            <th className="act" style={{ width: 210 }}>
+            <th>What it does</th>
+            <th className="act" style={{ width: 290 }}>
               <span className="sr">Actions</span>
             </th>
           </tr>
         }
-        empty={rules.length === 0 ? "No rules yet. Create one below." : undefined}
+        empty={rules.length === 0 ? "Nothing is on yet. Turn on a ready-made rule above." : undefined}
       >
         {rules.map((r) => (
           <tr key={r.id} className={r.enabled ? "" : "withdrawn"}>
             <td>
-              {r.name}
-              <small className="note">
-                {" "}
-                {[r.extensions.length ? r.extensions.join(", ") : null, r.name_regex ? `/${r.name_regex}/` : null, r.min_size ? `≥ ${formatBytes(r.min_size)}` : null]
-                  .filter(Boolean)
-                  .join(" · ") || "all files"}
+              <b>{r.name}</b>
+              <small className="note" style={{ display: "block" }}>
+                {describeRule(r)}
               </small>
             </td>
-            <td className="mono trunc" title={r.folder}>
-              {r.folder}
-            </td>
-            <td className="mono trunc" title={r.dest}>
-              {r.dest}
-            </td>
             <td className="act">
-              <button className="icon text" onClick={() => runNow(r)}>
-                Run now
+              <button className="icon text" onClick={() => runNow(r)} title="Also move the matching files that are in the folder already">
+                Move what is there now
               </button>
               <button className="icon text" onClick={() => toggle(r)}>
                 {r.enabled ? "Pause" : "Resume"}
@@ -543,23 +570,25 @@ export function Autopilot({ onDone }: { onDone: () => void }) {
           </tr>
         ))}
       </Table>
-      <hr />
-      <h2>New rule</h2>
-      <TextField id="ap-name" label="Name" value={name} onChange={setName} />
-      <FolderField label="Watch folder" value={folder} onPick={setFolder} />
-      <div className="row3">
-        <TextField id="ap-ext" label="File types" mono value={exts} onChange={setExts} hint="Comma separated: pdf, docx. Empty matches any" />
-        <TextField id="ap-re" label="Name matches (regex)" mono value={regex} onChange={setRegex} hint="Optional, e.g. ^invoice" />
-        <TextField id="ap-kb" label="Bigger than (KB)" type="number" mono value={minKb} onChange={setMinKb} />
-      </div>
-      <FolderField label="Move to" value={dest} onPick={setDest} />
-      <CheckField label="Sort into a subfolder named after the file type" checked={byType} onChange={setByType} />
-      <div className="actions">
-        <button className="primary" disabled={!name.trim() || !folder || !dest} onClick={add}>
-          Save rule
-        </button>
-      </div>
-      <Message m={message} />
+
+      <details className="ap-own">
+        <summary>Write my own rule</summary>
+        <TextField id="ap-name" label="Name" value={name} onChange={setName} hint="For example: Invoices" />
+        <FolderField label="When a file lands in this folder" value={folder} onPick={setFolder} />
+        <div className="row3">
+          <TextField id="ap-ext" label="and its type is" mono value={exts} onChange={setExts} hint="Comma separated, like pdf, docx. Empty means any type" />
+          <TextField id="ap-re" label="and its name contains (optional)" mono value={regex} onChange={setRegex} hint="A word or pattern, e.g. invoice" />
+          <TextField id="ap-kb" label="and it is bigger than (KB)" type="number" mono value={minKb} onChange={setMinKb} />
+        </div>
+        <FolderField label="move it to" value={dest} onPick={setDest} />
+        <CheckField label="Put each type in its own subfolder (pdf, png, zip\u2026)" checked={byType} onChange={setByType} />
+        {folder && dest && <p className="hint ap-sentence">{describeRule(draft)}</p>}
+        <div className="actions">
+          <button className="primary" disabled={!name.trim() || !folder || !dest} onClick={add}>
+            Turn on this rule
+          </button>
+        </div>
+      </details>
     </>
   );
 }

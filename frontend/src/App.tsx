@@ -2,34 +2,37 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Aperture,
   Braces,
+  ChevronRight,
   ClipboardList,
   Combine,
   Cpu,
   Eraser,
   EyeOff,
   Crop,
-  FileDown,
   FileOutput,
   FilePenLine,
-  FilePlus,
-  Film,
+  House,
   HardDrive,
   History,
-  Hash,
-  Image as ImageIcon,
+  GitCompare,
+  Paperclip,
+  Printer,
+  Puzzle,
+  Files,
+  ScanLine,
+  Share2,
+  BadgeCheck,
+  UserSquare,
+  LayoutGrid,
   Info,
   ImageMinus,
   KeyRound,
-  Layers,
   Library,
-  ListOrdered,
   Lock,
-  Maximize2,
   Mic,
   PencilLine,
   Pipette,
   ScanText,
-  Scissors,
   Stamp,
   TextCursorInput,
   Type,
@@ -37,12 +40,12 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { cancelJob, listHistory, listJobs, undoEntry, waitForEngine, type HistoryEntry, type JobRecord } from "./api";
+import { request, cancelJob, listHistory, listJobs, undoEntry, waitForEngine, type HistoryEntry, type JobRecord } from "./api";
 import { Table, Title, baseName } from "./shared";
 import { Ocr, Protect, Watermark } from "./tools";
-import { Merge, Split } from "./views/pdf";
-import { Convert, Organize, Redact } from "./views/docs";
-import { Background, Images, Upscale, Video } from "./views/media";
+import { Redact } from "./views/docs";
+import { Convert } from "./views/convert";
+import { Background, Video } from "./views/media";
 import { Documents, Models, Transcribe } from "./views/ai";
 import { Autopilot, Cleanup, DiskMap, Rename } from "./views/files";
 import { Vault } from "./views/vault";
@@ -51,7 +54,16 @@ import { Clipboard, ScreenTools } from "./views/desk";
 import { TitleBar } from "./titlebar";
 import { PhotoEditor } from "./views/photo";
 import { PdfEditor } from "./views/pdfeditor";
-import { AddSplit, ExportContent, Finish, Forms, PageNumbers, PageSize, Properties } from "./views/pdftools";
+import { Home } from "./views/home";
+import { Addons, Attachments, Compare, PdfBatch, PrintLayout, ScanClean, Sign } from "./views/more";
+import { Collage, IdPhoto, Social } from "./views/photomake";
+import { EDITOR_FILE } from "./lib/editorfile";
+import { collectBurst, parseOpenArgs } from "./lib/openargs";
+import { NOTICE, type Notice } from "./lib/notify";
+import { routeDrop, setPending, setPendingMany } from "./lib/handoff";
+import { Pages } from "./views/pages";
+import { getLang, setLang, type Lang } from "./lib/i18n";
+import { Forms, PageSize, Properties } from "./views/pdftools";
 import "./App.css";
 import "./forms.css";
 import "./editors.css";
@@ -59,27 +71,28 @@ import "./editors.css";
 type ViewDef = { id: string; label: string; group: string; Icon: LucideIcon; keywords?: string };
 
 const VIEWS: ViewDef[] = [
+  { id: "home", label: "Start", group: "Start", Icon: House, keywords: "home start begin what to do" },
   { id: "pdfedit", label: "PDF editor", group: "PDF", Icon: FilePenLine, keywords: "pdf edit add text signature image highlight draw note link erase annotate sign stamp" },
-  { id: "merge", label: "Merge", group: "PDF", Icon: Combine, keywords: "pdf combine join" },
-  { id: "split", label: "Extract pages", group: "PDF", Icon: Scissors, keywords: "pdf split pages" },
-  { id: "organize", label: "Organize pages", group: "PDF", Icon: ListOrdered, keywords: "pdf reorder rotate delete duplicate" },
-  { id: "addsplit", label: "Add and split", group: "PDF", Icon: FilePlus, keywords: "pdf insert blank pages split files bookmarks" },
-  { id: "pagenums", label: "Page numbers", group: "PDF", Icon: Hash, keywords: "pdf header footer bates numbering" },
+  { id: "pages", label: "Pages", group: "PDF", Icon: Combine, keywords: "pdf merge combine join split extract cut reorder rotate delete duplicate organize pages blank insert" },
+  { id: "pdfbatch", label: "Many PDFs at once", group: "PDF", Icon: Files, keywords: "pdf batch bulk folder compress watermark many files template" },
+  { id: "compare", label: "Compare two PDFs", group: "PDF", Icon: GitCompare, keywords: "pdf compare difference versions changes diff" },
+  { id: "scanclean", label: "Clean up a scan", group: "PDF", Icon: ScanLine, keywords: "scan straighten deskew crop black white clean" },
+  { id: "printlayout", label: "Print layout", group: "PDF", Icon: Printer, keywords: "pdf print booklet n-up pages per sheet imposition duplex" },
+  { id: "attachments", label: "Attachments and labels", group: "PDF", Icon: Paperclip, keywords: "pdf attach files page labels numbering roman" },
+  { id: "sign", label: "Digital signature", group: "PDF", Icon: BadgeCheck, keywords: "pdf sign certificate pfx p12 verify signature" },
   { id: "pagesize", label: "Page size", group: "PDF", Icon: Crop, keywords: "pdf crop margins paper a4 letter resize" },
   { id: "redact", label: "Redact", group: "PDF", Icon: EyeOff, keywords: "pdf black out remove text" },
   { id: "watermark", label: "Watermark", group: "PDF", Icon: Stamp, keywords: "pdf stamp logo signature" },
   { id: "protect", label: "Protect", group: "PDF", Icon: Lock, keywords: "pdf password encrypt unlock" },
   { id: "ocr", label: "Recognize text", group: "PDF", Icon: ScanText, keywords: "ocr scan searchable" },
-  { id: "convert", label: "Convert", group: "PDF", Icon: FileOutput, keywords: "word docx office compress metadata" },
-  { id: "export", label: "Export content", group: "PDF", Icon: FileDown, keywords: "pdf to images jpg png extract pictures text markdown images to pdf" },
+  { id: "convert", label: "Convert", group: "PDF", Icon: FileOutput, keywords: "convert word docx excel office pdf compress smaller jpg png webp heic photo format html text tables markdown repair metadata" },
   { id: "forms", label: "Forms", group: "PDF", Icon: TextCursorInput, keywords: "pdf fill form fields" },
   { id: "props", label: "Properties", group: "PDF", Icon: Info, keywords: "pdf metadata title author bookmarks outline" },
-  { id: "finish", label: "Flatten", group: "PDF", Icon: Layers, keywords: "pdf flatten annotations grayscale black white" },
-  { id: "photo", label: "Photo editor", group: "Photo and video", Icon: Aperture, keywords: "photo edit crop rotate straighten blur filter adjust brightness contrast text draw resize effects" },
-  { id: "images", label: "Batch convert", group: "Photo and video", Icon: ImageIcon, keywords: "compress webp jpeg convert exif bulk" },
-  { id: "background", label: "Remove background", group: "Photo and video", Icon: ImageMinus, keywords: "transparent png cutout" },
-  { id: "upscale", label: "Upscale", group: "Photo and video", Icon: Maximize2, keywords: "enlarge resolution esrgan" },
-  { id: "video", label: "Video", group: "Photo and video", Icon: Film, keywords: "compress mp4 ffmpeg" },
+  { id: "photo", label: "Photo editor", group: "Photo", Icon: Aperture, keywords: "photo edit crop rotate straighten blur filter adjust brightness contrast text draw resize effects" },
+  { id: "social", label: "Sizes for social media", group: "Photo", Icon: Share2, keywords: "instagram youtube linkedin facebook story cover resize template" },
+  { id: "idphoto", label: "Passport photos", group: "Photo", Icon: UserSquare, keywords: "passport id photo vesikalik biometric print sheet" },
+  { id: "collage", label: "Collage and more", group: "Photo", Icon: LayoutGrid, keywords: "collage gif animation panorama hdr merge exposure" },
+  { id: "background", label: "Remove background", group: "Photo", Icon: ImageMinus, keywords: "transparent png cutout" },
   { id: "transcribe", label: "Transcribe", group: "Intelligence", Icon: Mic, keywords: "whisper speech audio subtitles srt" },
   { id: "documents", label: "Documents", group: "Intelligence", Icon: Library, keywords: "ask chat rag search index semantic" },
   { id: "models", label: "Models", group: "Intelligence", Icon: Cpu, keywords: "download ai install" },
@@ -92,9 +105,14 @@ const VIEWS: ViewDef[] = [
   { id: "vault", label: "Vault", group: "Private", Icon: KeyRound, keywords: "encrypted secure files" },
   { id: "text", label: "Text", group: "Tools", Icon: Type, keywords: "clean paste scratchpad" },
   { id: "devlab", label: "Dev lab", group: "Tools", Icon: Braces, keywords: "jwt json sql base64 timestamp" },
+  { id: "addons", label: "Add-ons", group: "System", Icon: Puzzle, keywords: "install extra speech background ocr word optional download" },
   { id: "activity", label: "Activity", group: "System", Icon: History, keywords: "history undo jobs" },
 ];
-const GROUPS = [...new Set(VIEWS.map((v) => v.group))];
+/** Tools that were folded into Pages; old links and shortcuts still land somewhere sensible. */
+const OLD_VIEWS: Record<string, string> = { merge: "pages", split: "pages", organize: "pages", addsplit: "pages", export: "convert", images: "convert", upscale: "convert", pdfimages: "pdfedit", pagenums: "pdfedit", finish: "pdfedit" };
+/** What most people need, always visible. Everything else lives under "More tools". */
+const MAIN = ["home", "pdfedit", "pages", "photo", "convert", "clipboard"];
+const GROUPS = [...new Set(VIEWS.filter((v) => !MAIN.includes(v.id)).map((v) => v.group))];
 
 /** 1 -> A, 26 -> Z, 27 -> AA */
 function revLetter(n: number): string {
@@ -114,13 +132,34 @@ export default function App() {
   const [engineError, setEngineError] = useState("");
   const [view, setView] = useState<string>(() => {
     const h = window.location.hash.slice(1);
-    return VIEWS.some((v) => v.id === h) ? h : "pdfedit";
+    const id = OLD_VIEWS[h] ?? h;
+    return VIEWS.some((v) => v.id === id) ? id : "home";
   });
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loadError, setLoadError] = useState("");
   const [palette, setPalette] = useState(false);
-  const immersive = view === "photo" || view === "pdfedit";
+  const [dropSeq, setDropSeq] = useState(0); // a new drop restarts the tool, so it opens the new file
+  const [dragging, setDragging] = useState(false);
+  const [dropNote, setDropNote] = useState("");
+  const [lang, setLangState] = useState<Lang>(getLang());
+  const [openGroups, setOpenGroups] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("officev2.groups") ?? "null");
+      if (Array.isArray(saved)) return saved;
+    } catch {
+      /* storage unavailable */
+    }
+    return [];
+  });
+  // the editors want the whole window, but only once a file is open: until then the tool list stays
+  const [editorFile, setEditorFile] = useState(false);
+  useEffect(() => {
+    const on = (e: Event) => setEditorFile(Boolean((e as CustomEvent<boolean>).detail));
+    window.addEventListener(EDITOR_FILE, on);
+    return () => window.removeEventListener(EDITOR_FILE, on);
+  }, []);
+  const immersive = (view === "photo" || view === "pdfedit") && editorFile;
   const [railOpen, setRailOpen] = useState(!immersive);
   // the editors want the whole window: the tool list folds away when one opens and returns when you leave it
   useEffect(() => setRailOpen(!immersive), [immersive]);
@@ -136,6 +175,42 @@ export default function App() {
     }
   }, []);
 
+  // the engine stopped while the app was open: say so, offer a restart, and carry on when it answers again
+  const [engineDown, setEngineDown] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const on = (e: Event) => {
+      setNotice((e as CustomEvent<Notice>).detail.text);
+      clearTimeout(timer);
+      timer = setTimeout(() => setNotice(null), 8000);
+    };
+    window.addEventListener(NOTICE, on);
+    return () => {
+      window.removeEventListener(NOTICE, on);
+      clearTimeout(timer);
+    };
+  }, []);
+  const readyRef = useRef(false);
+  readyRef.current = engine === "ready";
+  useEffect(() => {
+    const down = () => readyRef.current && setEngineDown(true);
+    window.addEventListener("engine-down", down);
+    return () => window.removeEventListener("engine-down", down);
+  }, []);
+  useEffect(() => {
+    if (!engineDown) return;
+    const t = setInterval(() => {
+      request("/health")
+        .then(() => {
+          setEngineDown(false);
+          void refresh();
+        })
+        .catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(t);
+  }, [engineDown, refresh]);
+
   useEffect(() => {
     waitForEngine()
       .then(() => {
@@ -147,6 +222,81 @@ export default function App() {
         setEngineError(String(e));
       });
   }, [refresh]);
+
+  // files Windows hands to the app (double click, right click "Edit/Convert with officev2", command line)
+  useEffect(() => {
+    if (engine !== "ready") return;
+    let off: (() => void) | undefined;
+    let dead = false;
+    let convert = false;
+    const open = (paths: string[]) => {
+      if (!paths.length) return;
+      if (convert) {
+        setPending(paths[0]);
+        setDropSeq((n) => n + 1);
+        setView("convert");
+        convert = false;
+        return;
+      }
+      const route = routeDrop(paths);
+      if (!route) return;
+      if (route.tool === "pages") setPendingMany(route.paths);
+      else setPending(route.paths[0]);
+      setDropSeq((n) => n + 1);
+      setView(route.tool);
+    };
+    const burst = collectBurst(open);
+    const take = (args: string[]) => {
+      const req = parseOpenArgs(args);
+      if (req.convert) convert = true;
+      if (req.paths.length) burst(req.paths);
+    };
+    Promise.all([import("@tauri-apps/api/core"), import("@tauri-apps/api/event")])
+      .then(async ([{ invoke }, { listen }]) => {
+        take(await invoke<string[]>("take_open_args"));
+        const un = await listen<string[]>("open-files", (e) => {
+          void invoke("take_open_args"); // the same files are in the queue too: empty it so they are not opened twice
+          take(e.payload);
+        });
+        if (dead) un();
+        else off = un;
+      })
+      .catch(() => undefined); // plain browser: no desktop shell
+    return () => {
+      dead = true;
+      off?.();
+    };
+  }, [engine]);
+
+  useEffect(() => {
+    // files dropped on the window open straight in the right editor (desktop shell only)
+    let off: (() => void) | undefined;
+    let dead = false;
+    import("@tauri-apps/api/webview")
+      .then(({ getCurrentWebview }) => getCurrentWebview().onDragDropEvent((e) => {
+        const t = e.payload.type;
+        if (t === "enter" || t === "over") setDragging(true);
+        else if (t === "leave") setDragging(false);
+        else if (t === "drop") {
+          setDragging(false);
+          const route = routeDrop(e.payload.paths);
+          if (route) {
+            setDropNote("");
+            if (route.tool === "pages") setPendingMany(route.paths);
+            else setPending(route.paths[0]);
+            setDropSeq((n) => n + 1);
+            setView(route.tool);
+            setPalette(false);
+          } else setDropNote("That kind of file can't be opened here. Drop a PDF or a photo.");
+        }
+      }))
+      .then((un) => (dead ? un() : (off = un)))
+      .catch(() => undefined); // plain browser: no desktop shell
+    return () => {
+      dead = true;
+      off?.();
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -160,31 +310,60 @@ export default function App() {
   }, []);
 
   const current = VIEWS.find((v) => v.id === view) ?? VIEWS[0];
+  // the group of the tool you are in is always open, so you can see where you are
+  const isOpen = (g: string) => g === current.group || openGroups.includes(g);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const showMore = moreOpen || !MAIN.includes(current.id);
+  const toggleGroup = (g: string) =>
+    setOpenGroups((cur) => {
+      const next = cur.includes(g) ? cur.filter((x) => x !== g) : [...cur, g];
+      try {
+        localStorage.setItem("officev2.groups", JSON.stringify(next));
+      } catch {
+        /* storage unavailable */
+      }
+      return next;
+    });
   const go = (id: string) => {
-    setView(id);
+    setView(OLD_VIEWS[id] ?? id);
     setPalette(false);
   };
-  const revCount = useMemo(() => buildRows(jobs, history).length, [jobs, history]);
-  const lastRev = revCount ? revLetter(revCount) : "—";
 
   return (
     <div className="app">
-    <TitleBar tool={current.label} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} />
+    <TitleBar tool={current.label} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} lang={lang} onLang={(l) => { setLang(l); setLangState(l); }} />
     <div className={`shell ${railOpen ? "" : "norail"}`}>
       <nav className="rail" aria-label="Tools">
         <button className="palette-hint" onClick={() => setPalette(true)} aria-label="Open command palette">
           <span>Search tools</span>
           <kbd>Ctrl K</kbd>
         </button>
-        {GROUPS.map((g) => (
+        <div className="group main">
+          {VIEWS.filter((v) => MAIN.includes(v.id)).map(({ id, label, Icon }) => (
+            <button key={id} className={view === id ? "nav on" : "nav"} aria-current={view === id ? "page" : undefined} onClick={() => go(id)}>
+              <Icon size={16} strokeWidth={1.5} aria-hidden />
+              {label}
+            </button>
+          ))}
+        </div>
+        <button className="group-label foldable more" aria-expanded={showMore} onClick={() => MAIN.includes(current.id) && setMoreOpen((o) => !o)}>
+          <ChevronRight size={13} strokeWidth={1.8} aria-hidden className={showMore ? "turned" : ""} />
+          More tools
+        </button>
+        {showMore && GROUPS.map((g) => (
           <div key={g} className="group">
-            <div className="group-label">{g}</div>
-            {VIEWS.filter((v) => v.group === g).map(({ id, label, Icon }) => (
-              <button key={id} className={view === id ? "nav on" : "nav"} aria-current={view === id ? "page" : undefined} onClick={() => go(id)}>
-                <Icon size={16} strokeWidth={1.5} aria-hidden />
-                {label}
-              </button>
-            ))}
+            <button className="group-label foldable" aria-expanded={isOpen(g)} onClick={() => g !== current.group && toggleGroup(g)}>
+              <ChevronRight size={13} strokeWidth={1.8} aria-hidden className={isOpen(g) ? "turned" : ""} />
+              {g}
+              <small>{VIEWS.filter((v) => v.group === g && !MAIN.includes(v.id)).length}</small>
+            </button>
+            {isOpen(g) &&
+              VIEWS.filter((v) => v.group === g && !MAIN.includes(v.id)).map(({ id, label, Icon }) => (
+                <button key={id} className={view === id ? "nav on" : "nav"} aria-current={view === id ? "page" : undefined} onClick={() => go(id)}>
+                  <Icon size={16} strokeWidth={1.5} aria-hidden />
+                  {label}
+                </button>
+              ))}
           </div>
         ))}
       </nav>
@@ -192,33 +371,32 @@ export default function App() {
       <main>
         <div className={`sheet ${immersive ? "fill" : ""}`}>
           {engine === "error" && <p className="msg bad">{engineError}</p>}
+          {notice && (
+            <p className="msg bad notice" role="alert">
+              {notice} <button onClick={() => setNotice(null)}>Dismiss</button>
+            </p>
+          )}
+          {engineDown && (
+            <p className="msg bad" role="alert">
+              The engine stopped answering. {" "}
+              <button
+                onClick={() =>
+                  import("@tauri-apps/api/core").then(({ invoke }) => invoke("restart_engine")).catch(() => undefined)
+                }
+              >
+                Restart the engine
+              </button>
+            </p>
+          )}
           {engine === "starting" && <p className="muted">Starting the local engine…</p>}
           {engine === "ready" && loadError && <p className="msg bad">{loadError}</p>}
-          {engine === "ready" && <ViewSwitch id={view} refresh={refresh} go={go} jobs={jobs} history={history} />}
+          {dropNote && <p className="msg bad">{dropNote}</p>}
+          {engine === "ready" && <ViewSwitch key={dropSeq} id={view} refresh={refresh} go={go} jobs={jobs} history={history} />}
         </div>
 
-        <footer className="titleblock" aria-label="Status">
-          <div className="cell wide">
-            <span>Tool</span>
-            <b>{current.label}</b>
-          </div>
-          <div className="cell">
-            <span>Engine</span>
-            <b className={`eng ${engine}`}>{engine === "ready" ? "running" : engine === "starting" ? "starting" : "failed"}</b>
-          </div>
-          <div className="cell">
-            <span>Last rev</span>
-            <b className="mono">{lastRev}</b>
-          </div>
-          <div className="cell">
-            <span>Sheet</span>
-            <b className="mono">
-              {VIEWS.indexOf(current) + 1}/{VIEWS.length}
-            </b>
-          </div>
-        </footer>
       </main>
 
+      {dragging && <div className="drop-veil" aria-hidden>Drop a PDF or photo to open it</div>}
       {palette && <Palette onPick={go} onClose={() => setPalette(false)} />}
     </div>
     </div>
@@ -239,30 +417,40 @@ function ViewSwitch({
   history: HistoryEntry[];
 }) {
   switch (id) {
+    case "home":
+      return <Home go={go} />;
     case "pdfedit":
       return <PdfEditor onDone={refresh} />;
     case "photo":
       return <PhotoEditor onDone={refresh} />;
-    case "pagenums":
-      return <PageNumbers onDone={refresh} />;
+    case "pdfbatch":
+      return <PdfBatch onDone={refresh} />;
+    case "sign":
+      return <Sign onDone={refresh} />;
+    case "compare":
+      return <Compare onDone={refresh} />;
+    case "scanclean":
+      return <ScanClean onDone={refresh} />;
+    case "printlayout":
+      return <PrintLayout onDone={refresh} />;
+    case "attachments":
+      return <Attachments onDone={refresh} />;
+    case "social":
+      return <Social onDone={refresh} />;
+    case "idphoto":
+      return <IdPhoto onDone={refresh} />;
+    case "collage":
+      return <Collage onDone={refresh} />;
+    case "addons":
+      return <Addons onDone={refresh} />;
     case "pagesize":
       return <PageSize onDone={refresh} />;
-    case "addsplit":
-      return <AddSplit onDone={refresh} />;
-    case "export":
-      return <ExportContent onDone={refresh} />;
     case "forms":
       return <Forms onDone={refresh} />;
     case "props":
       return <Properties onDone={refresh} />;
-    case "finish":
-      return <Finish onDone={refresh} />;
-    case "merge":
-      return <Merge onDone={refresh} />;
-    case "split":
-      return <Split onDone={refresh} />;
-    case "organize":
-      return <Organize onDone={refresh} />;
+    case "pages":
+      return <Pages onDone={refresh} />;
     case "convert":
       return <Convert onDone={refresh} />;
     case "protect":
@@ -273,14 +461,10 @@ function ViewSwitch({
       return <Redact onDone={refresh} />;
     case "ocr":
       return <Ocr onDone={refresh} />;
-    case "images":
-      return <Images onDone={refresh} />;
     case "video":
       return <Video onDone={refresh} />;
     case "background":
       return <Background onDone={refresh} />;
-    case "upscale":
-      return <Upscale onDone={refresh} goToModels={() => go("models")} />;
     case "transcribe":
       return <Transcribe onDone={refresh} />;
     case "documents":

@@ -1,3 +1,9 @@
+import { failed } from "../lib/notify";
+import { useAnnounceEditorFile } from "../lib/editorfile";
+import { useHistory } from "../lib/useHistory";
+import { useStyleClipboard } from "../lib/useStyleClipboard";
+import { FileMenu } from "./pdfpages";
+import { takePending } from "../lib/handoff";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -11,6 +17,11 @@ import {
   FlipVertical2,
   Frame,
   ListChecks,
+  Spline,
+  Palette,
+  Move3d,
+  Wand2,
+  QrCode,
   Redo2,
   RotateCcw,
   RotateCw,
@@ -20,9 +31,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { get, post, put as putSetting } from "../api";
-import { CheckField, FolderField, InputsField, RunBar, SelectField, TextField, baseName, formatBytes, imageFilter, useTask } from "../shared";
+import { CheckField, ConfirmDialog, FolderField, InputsField, RunBar, SaveState, SelectField, TextField, baseName, formatBytes, imageFilter, useTask } from "../shared";
 import { ColorInput, CropBox, Slider, usePhotoPreview } from "../photoui";
-import { ALL_PTOOLS, ObjectLayer, PHOTO_GROUPS, PhotoBar, makeDefs, type Defs, type PTool } from "./photoobjects";
+import { CurvesPanel, ExtraPanel, HslPanel, PerspectivePanel, QrPanel } from "./photopanels";
+import { ALL_PTOOLS, ObjectLayer, PHOTO_GROUPS, PhotoBar, makeDefs, styleOf, type Defs, type PTool } from "./photoobjects";
 import { ADJUST_KEYS, aspectRect, current, describe, isObject, ordered, pipeline, put, type Item, type Op } from "../lib/photoOps";
 import { normAspect, type Rect } from "../lib/crop";
 
@@ -80,6 +92,17 @@ function CropPanel(p: Panel) {
 
   const isFull = rect.w > 0.999 && rect.h > 0.999;
 
+  // a frame you moved but did not "apply" is applied when you leave this panel, so it is never silently lost
+  const latest = useRef({ rect, commit: p.commit });
+  latest.current = { rect, commit: p.commit };
+  useEffect(
+    () => () => {
+      const r = latest.current.rect;
+      if (r.w < 0.999 || r.h < 0.999) latest.current.commit({ type: "crop", x: r.x, y: r.y, w: r.w, h: r.h });
+    },
+    [],
+  );
+
   return (
     <>
       <SelectField id="cr-asp" label="Shape" value={aspectId} onChange={setAspectId} options={ASPECTS.map((x) => ({ id: x.id, label: x.label }))} />
@@ -94,7 +117,7 @@ function CropPanel(p: Panel) {
           Reset frame
         </button>
       </div>
-      <p className="hint">Drag the frame or its handles on the photo. Applying a crop adds a step you can remove later.</p>
+      <p className="hint">Drag the frame or its handles on the photo. The crop is applied when you press the button or open another tool. You can remove it later in All edits.</p>
       <hr />
       <span className="label">Rotate and flip</span>
       <div className="iconrow">
@@ -197,7 +220,7 @@ function FiltersPanel(p: Panel) {
     <>
       <div className="filtergrid">
         <button className={!filter ? "on" : ""} aria-pressed={!filter} onClick={() => p.commit({ type: "filter", name: "" })}>
-          <span className="ph" />
+          {thumbs.__none__ ? <img src={`data:image/jpeg;base64,${thumbs.__none__}`} alt="" /> : <span className="ph" />}
           <small>None</small>
         </button>
         {p.filters.map((f) => (
@@ -283,6 +306,7 @@ function BlurPanel(p: Panel) {
 function FramePanel(p: Panel) {
   const border = current<Op & { width: number; color: string }>(p.items, "border");
   const rounded = current<Op & { radius: number }>(p.items, "rounded");
+  const inner = current<Op & { radius: number }>(p.items, "inner_rounded");
   const [borderColor, setBorderColor] = useState("#ffffff");
   const bg = current<Op>(p.items, "remove_background");
 
@@ -306,8 +330,9 @@ function FramePanel(p: Panel) {
           if (border) p.live({ ...border, color: c });
         }}
       />
-      <Slider label="Rounded corners" value={rounded?.radius ?? 0} min={0} max={Math.round(Math.min(p.info.width, p.info.height) / 2)} unit=" px" onStart={p.begin} onEnd={p.end} onChange={(v) => p.live({ type: "rounded", radius: v })} />
-      <p className="hint">Rounded corners are transparent: save as PNG or WebP to keep them.</p>
+      <Slider label="Photo corners" value={inner?.radius ?? 0} min={0} max={Math.round(Math.min(p.info.width, p.info.height) / 2)} unit=" px" onStart={p.begin} onEnd={p.end} onChange={(v) => p.live({ type: "inner_rounded", radius: v })} />
+      <Slider label="Frame corners" value={rounded?.radius ?? 0} min={0} max={Math.round(Math.min(p.info.width, p.info.height) / 2)} unit=" px" onStart={p.begin} onEnd={p.end} onChange={(v) => p.live({ type: "rounded", radius: v })} />
+      <p className="hint">Photo corners round the picture inside the border. Frame corners round the outside of everything. Rounded outside corners are transparent: save as PNG or WebP to keep them.</p>
       <hr />
       <div className="actions tight">
         <button aria-pressed={!!bg} className={bg ? "on" : ""} onClick={() => p.commit(bg ? { type: "remove_background", _off: true } : { type: "remove_background" })}>
@@ -323,9 +348,9 @@ function FramePanel(p: Panel) {
 /* Resize, save, batch                                                                        */
 /* ------------------------------------------------------------------------------------------ */
 
-const EXT: Record<string, string> = { jpeg: "jpg", png: "png", webp: "webp", tiff: "tiff", bmp: "bmp", pdf: "pdf" };
+const EXT: Record<string, string> = { jpeg: "jpg", png: "png", webp: "webp", tiff: "tiff", bmp: "bmp", pdf: "pdf", avif: "avif", gif: "gif", ico: "ico" };
 
-function SavePanel(p: Panel & { edits: Op[]; resultSize: [number, number] | null; onDone: () => void }) {
+function SavePanel(p: Panel & { edits: Op[]; resultSize: [number, number] | null; onDone: () => void; onSaved: () => void; presets: Record<string, Op[]> }) {
   const resize = current<Op & { mode: string; factor?: number; max_side?: number; width?: number; height?: number }>(p.items, "resize");
   const [fmt, setFmt] = useState("jpeg");
   const [quality, setQuality] = useState(92);
@@ -333,15 +358,19 @@ function SavePanel(p: Panel & { edits: Op[]; resultSize: [number, number] | null
   const [background, setBackground] = useState("#ffffff");
   const [batchIn, setBatchIn] = useState<string[]>([]);
   const [batchOut, setBatchOut] = useState<string | null>(null);
+  const [batchSet, setBatchSet] = useState("");  // "" = the edits on this photo, otherwise a saved preset
+  const batchEdits = batchSet && p.presets[batchSet] ? p.presets[batchSet] : p.edits;
   const task = useTask(p.onDone);
   const batch = useTask(p.onDone);
   const mode = resize?.mode ?? "none";
-  const lossy = fmt === "jpeg" || fmt === "webp";
+  const lossy = fmt === "jpeg" || fmt === "webp" || fmt === "avif";
 
   async function saveCopy() {
     const ext = EXT[fmt];
     const output = await save({ filters: [{ name: fmt.toUpperCase(), extensions: [ext] }], defaultPath: `${stem(p.file)}-edited.${ext}` });
-    if (output) await task.run("/photo/export", { input: p.file, edits: p.edits, output, format: fmt, quality, strip_metadata: strip, background });
+    if (!output) return;
+    const job = await task.run("/photo/export", { input: p.file, edits: p.edits, output, format: fmt, quality, strip_metadata: strip, background });
+    if (job?.state === "done") p.onSaved();
   }
 
   return (
@@ -389,6 +418,9 @@ function SavePanel(p: Panel & { edits: Op[]; resultSize: [number, number] | null
           { id: "tiff", label: "TIFF" },
           { id: "bmp", label: "BMP" },
           { id: "pdf", label: "PDF (one page)" },
+          { id: "avif", label: "AVIF (small, modern)" },
+          { id: "gif", label: "GIF" },
+          { id: "ico", label: "Icon (.ico)" },
         ]}
       />
       {lossy && <Slider label="Quality" value={quality} min={40} max={100} onChange={setQuality} reset={92} />}
@@ -397,15 +429,16 @@ function SavePanel(p: Panel & { edits: Op[]; resultSize: [number, number] | null
       <RunBar label="Save a copy…" busyLabel="Saving…" onRun={saveCopy} task={task} />
       <hr />
       <h2>Apply to many photos</h2>
-      <p className="hint">Uses the edits in the list for every photo you choose. Crops are relative, so they fit photos of any size.</p>
+      <p className="hint">Gives every photo you choose the same edits. Crops are relative, so they fit photos of any size.</p>
+      <SelectField id="bt-set" label="Edits to use" value={batchSet} onChange={setBatchSet} options={[{ id: "", label: "The edits on this photo" }, ...Object.keys(p.presets).map((n) => ({ id: n, label: `Saved look: ${n}` }))]} />
       <InputsField label="Photos or folders" items={batchIn} onChange={setBatchIn} filters={imageFilter} />
       <FolderField label="Save to folder" value={batchOut} onPick={setBatchOut} />
       <RunBar
         label="Apply to all"
         busyLabel="Working…"
-        disabled={batchIn.length === 0 || !batchOut || p.edits.length === 0}
+        disabled={batchIn.length === 0 || !batchOut || batchEdits.length === 0}
         task={batch}
-        onRun={() => batch.run("/photo/batch", { inputs: batchIn, out_dir: batchOut, edits: p.edits, format: fmt === "pdf" ? "jpeg" : fmt, quality, strip_metadata: strip, background })}
+        onRun={() => batch.run("/photo/batch", { inputs: batchIn, out_dir: batchOut, edits: batchEdits, format: fmt === "pdf" || fmt === "ico" || fmt === "gif" ? "jpeg" : fmt, quality, strip_metadata: strip, background })}
       />
     </>
   );
@@ -416,11 +449,16 @@ function SavePanel(p: Panel & { edits: Op[]; resultSize: [number, number] | null
 /* ------------------------------------------------------------------------------------------ */
 
 type Presets = Record<string, Op[]>;
-type SectionId = "crop" | "adjust" | "filters" | "blur" | "frame" | "save" | "edits";
+type SectionId = "crop" | "adjust" | "curves" | "hsl" | "extra" | "perspective" | "qr" | "filters" | "blur" | "frame" | "save" | "edits";
 
 const SECTIONS: { id: SectionId; label: string; sub: string; Icon: LucideIcon }[] = [
   { id: "crop", label: "Crop and rotate", sub: "Crop, straighten, rotate, flip", Icon: Crop },
   { id: "adjust", label: "Light and color", sub: "Brightness, contrast, warmth…", Icon: SlidersHorizontal },
+  { id: "curves", label: "Curves", sub: "Fine tone control", Icon: Spline },
+  { id: "hsl", label: "Colour mixer", sub: "Change one colour at a time", Icon: Palette },
+  { id: "perspective", label: "Straighten perspective", sub: "Fix leaning documents and buildings", Icon: Move3d },
+  { id: "extra", label: "More corrections", sub: "Noise, lens, tones, colour looks", Icon: Wand2 },
+  { id: "qr", label: "QR code", sub: "Add a code people can scan", Icon: QrCode },
   { id: "filters", label: "Filters and looks", sub: "Filters, vignette, film grain", Icon: Sparkles },
   { id: "blur", label: "Blur the whole photo", sub: "Tilt-shift, motion blur", Icon: Droplet },
   { id: "frame", label: "Border and background", sub: "Border, round corners, cut-out", Icon: Frame },
@@ -430,10 +468,9 @@ const SECTIONS: { id: SectionId; label: string; sub: string; Icon: LucideIcon }[
 
 export function PhotoEditor({ onDone }: { onDone: () => void }) {
   const [file, setFile] = useState<string | null>(null);
+  useAnnounceEditorFile(file !== null);
   const [info, setInfo] = useState<Info | null>(null);
   const [items, setItems] = useState<Item[]>([]);
-  const [past, setPast] = useState<Item[][]>([]);
-  const [future, setFuture] = useState<Item[][]>([]);
   const [section, setSection] = useState<SectionId | null>("adjust");
   const [tool, setTool] = useState<PTool>("select");
   const [selected, setSelected] = useState<number | null>(null);
@@ -446,10 +483,10 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
   const [presetName, setPresetName] = useState("");
   const [loadError, setLoadError] = useState("");
   const [logo, setLogo] = useState<string | null>(null);
+  const [savedKey, setSavedKey] = useState("[]");
+  const [ask, setAsk] = useState<null | "close" | "open">(null);
   const [defs, setDefs] = useState<Defs>(() => makeDefs(3000));
   const idc = useRef(1);
-  const gestureOpen = useRef(false);
-  const gestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingBase = useRef<Item[] | null>(null);
   const clip = useRef<Item | null>(null);
   const itemsRef = useRef(items);
@@ -457,24 +494,51 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
   const nextId = useCallback(() => idc.current++, []);
 
   useEffect(() => {
-    get<{ fonts: string[]; filters: string[] }>("/photo/fonts").then(setFonts).catch(() => undefined);
-    get<Record<string, unknown>>("/settings").then((s) => setPresets((s.photo_presets as Presets) ?? {})).catch(() => undefined);
+    get<{ fonts: string[]; filters: string[] }>("/photo/fonts").then(setFonts).catch(failed("Could not load the font list"));
+    get<Record<string, unknown>>("/settings").then((s) => setPresets((s.photo_presets as Presets) ?? {})).catch(failed("Could not load your saved looks"));
   }, []);
 
   async function choose() {
     const picked = await open({ multiple: false, filters: imageFilter });
-    if (typeof picked !== "string") return;
+    if (typeof picked === "string") await openFile(picked);
+  }
+
+  /** Close the photo or open another one, asking first when there are edits that were not saved. */
+  function leave(what: "close" | "open") {
+    if (dirty) setAsk(what);
+    else void doLeave(what);
+  }
+  async function doLeave(what: "close" | "open") {
+    setAsk(null);
+    if (what === "open") await choose();
+    else {
+      setFile(null);
+      setInfo(null);
+      setItems([]);
+      history.clear();
+      setSavedKey("[]");
+    }
+  }
+
+  // a file dropped on the window (or chosen on the start screen) opens as soon as the editor appears
+  useEffect(() => {
+    const dropped = takePending();
+    if (dropped) void openFile(dropped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function openFile(picked: string) {
     try {
       const i = await post<Info>("/photo/info", { input: picked });
       setInfo(i);
       setDefs((d) => ({ ...makeDefs(i.width), font: d.font }));
       setFile(picked);
       setItems([]);
-      setPast([]);
-      setFuture([]);
+      history.clear();
       setSelected(null);
       setEditing(null);
       setTool("select");
+      setSavedKey("[]");
       setLoadError("");
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -482,47 +546,14 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
   }
 
   /* ---- history ---- */
-  const record = () => {
-    setPast((p) => [...p.slice(-59), itemsRef.current]);
-    setFuture([]);
-  };
-  /** One undo step for a burst of changes (a drag, a slider). */
-  const touch = () => {
-    if (!gestureOpen.current) {
-      gestureOpen.current = true;
-      record();
-    }
-    clearTimeout(gestureTimer.current);
-    gestureTimer.current = setTimeout(() => (gestureOpen.current = false), 700);
-  };
+  const history = useHistory<Item[]>({ value: items, valueRef: itemsRef, setValue: setItems, onRestore: () => setEditing(null) });
+  const { past, future, record, touch, begin, end, undo, redo } = history;
   const apply = useCallback((cur: Item[], op: Op) => (op._off ? cur.filter((i) => i.type !== op.type) : put(cur, op, nextId)), [nextId]);
   const commit = (op: Op) => {
     record();
     setItems((cur) => apply(cur, op));
   };
   const live = (op: Op) => setItems((cur) => apply(cur, op));
-  const begin = () => {
-    gestureOpen.current = false;
-    touch();
-    clearTimeout(gestureTimer.current); // stays open until end()
-  };
-  const end = () => {
-    gestureOpen.current = false;
-  };
-  const undo = useCallback(() => {
-    if (!past.length) return;
-    setFuture((f) => [...f, items]);
-    setItems(past[past.length - 1]);
-    setPast((p) => p.slice(0, -1));
-    setEditing(null);
-  }, [past, items]);
-  const redo = useCallback(() => {
-    if (!future.length) return;
-    setPast((p) => [...p, items]);
-    setItems(future[future.length - 1]);
-    setFuture((f) => f.slice(0, -1));
-    setEditing(null);
-  }, [future, items]);
 
   /* ---- placed objects ---- */
   const patchItem = (id: number, change: Partial<Op>) =>
@@ -535,7 +566,7 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
       }),
     );
 
-  function place(op: Op, opts: { edit?: boolean; keepTool?: boolean } = {}) {
+  function place(op: Op, opts: { edit?: boolean; keepTool?: boolean; stay?: boolean } = {}) {
     let o = op;
     if (o.type === "overlay" && !o.path) {
       if (!logo) return;
@@ -547,7 +578,7 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
     setItems((cur) => [...cur, item]);
     setSelected(item.id);
     if (opts.edit) setEditing(item.id);
-    if (!opts.keepTool) {
+    if (!opts.keepTool && !opts.stay) {
       setTool("select");
     }
     if (opts.keepTool) setSelected(null);
@@ -564,9 +595,17 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
     } else if (pendingBase.current) {
       const base = pendingBase.current;
       pendingBase.current = null;
-      setPast((p) => [...p.slice(-59), base]);
-      setFuture([]);
+      history.push(base);
     }
+  };
+  const styles = useStyleClipboard<Item>(styleOf);
+  const copyStyle = () => styles.copy(itemsRef.current.find((i) => i.id === selected));
+  const pasteStyle = () => {
+    const it = itemsRef.current.find((i) => i.id === selected);
+    const style = styles.styleFor(it);
+    if (!it || !style) return;
+    touch();
+    patchItem(it.id, style as Partial<Op>);
   };
   const removeItem = (id: number) => {
     record();
@@ -623,6 +662,11 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
       } else if (mod && k === "d" && sel) {
         e.preventDefault();
         duplicate(sel);
+      } else if (mod && e.shiftKey && k === "c" && sel) {
+        copyStyle();
+      } else if (mod && e.shiftKey && k === "v") {
+        e.preventDefault();
+        pasteStyle();
       } else if (mod && k === "c" && sel) {
         clip.current = sel;
       } else if (mod && k === "v" && clip.current) {
@@ -662,6 +706,8 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
   const pv = usePhotoPreview(file, compare ? [] : edits, 80, ids);
   const shown = pv.data;
   const size = shown ? { w: shown.width, h: shown.height } : null;
+  const drawn = useMemo(() => new Set<number>((pv.tag as number[] | undefined) ?? []), [pv.tag]);
+  const dirty = useMemo(() => JSON.stringify(saved) !== savedKey, [saved, savedKey]);
   const sizes = useMemo(() => {
     const m = new Map<number, { w: number; h: number }>();
     if (!shown?.boxes || compare) return m;
@@ -741,9 +787,10 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
         <button className={compare ? "on" : ""} aria-pressed={compare} onPointerDown={() => setCompare(true)} onPointerUp={() => setCompare(false)} onPointerLeave={() => setCompare(false)}>
           <Eye size={15} strokeWidth={1.5} /> Hold to compare
         </button>
-        <button onClick={choose}>Open another…</button>
+        <SaveState dirty={dirty} hasEdits={items.length > 0} />
+        <FileMenu what="photo" onOpen={() => leave("open")} onClose={() => leave("close")} />
         <button className="primary" onClick={() => setSection("save")}>
-          Save…
+          Save a copy…
         </button>
       </div>
 
@@ -754,6 +801,7 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
         defs={defs}
         setDefs={setDefs}
         fonts={fonts.fonts}
+        onFonts={(all) => setFonts((f) => ({ ...f, fonts: all }))}
         maxSide={Math.max(info.width, info.height)}
         hasImage={Boolean(logo)}
         patch={patchItem}
@@ -761,6 +809,9 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
         onDelete={() => sel && removeItem(sel.id)}
         onDuplicate={() => sel && duplicate(sel)}
         onPickImage={() => pickLogo(true)}
+        hasStyle={styles.has}
+        onCopyStyle={copyStyle}
+        onPasteStyle={pasteStyle}
       />
 
       <div className="photomain">
@@ -797,6 +848,7 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
                 patch={patchItem}
                 touch={touch}
                 place={place}
+                drawn={drawn}
                 onText={(id, text) => {
                   touch();
                   patchItem(id, { text });
@@ -823,10 +875,15 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
                 <div className="accbody">
                   {id === "crop" && <CropPanel {...panel} />}
                   {id === "adjust" && <AdjustPanel {...panel} />}
+                  {id === "curves" && <CurvesPanel {...panel} />}
+                  {id === "hsl" && <HslPanel {...panel} />}
+                  {id === "perspective" && <PerspectivePanel {...panel} />}
+                  {id === "extra" && <ExtraPanel {...panel} />}
+                  {id === "qr" && <QrPanel {...panel} />}
                   {id === "filters" && <FiltersPanel {...panel} />}
                   {id === "blur" && <BlurPanel {...panel} />}
                   {id === "frame" && <FramePanel {...panel} />}
-                  {id === "save" && <SavePanel {...panel} edits={saved} resultSize={shown?.result_size ?? null} onDone={onDone} />}
+                  {id === "save" && <SavePanel {...panel} edits={saved} resultSize={shown?.result_size ?? null} onDone={onDone} onSaved={() => setSavedKey(JSON.stringify(saved))} presets={presets} />}
                   {id === "edits" && (
                     <>
                       <h2>Edits ({items.length})</h2>
@@ -880,6 +937,17 @@ export function PhotoEditor({ onDone }: { onDone: () => void }) {
           ))}
         </aside>
       </div>
+      {ask && (
+        <ConfirmDialog
+          title="This photo has changes you did not save"
+          text="Saving makes a copy of the photo with your edits. Your original is never changed. If you continue without saving, the edits are lost."
+          choices={[
+            { label: "Save a copy first", kind: "primary", onClick: () => { setAsk(null); setSection("save"); } },
+            { label: ask === "close" ? "Close without saving" : "Open another without saving", kind: "danger", onClick: () => void doLeave(ask) },
+          ]}
+          onCancel={() => setAsk(null)}
+        />
+      )}
     </div>
   );
 }

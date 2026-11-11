@@ -12,6 +12,24 @@ const errText = (e: unknown) => {
 
 type Clip = { id: number; kind: "text" | "image"; text: string; width: number; height: number; thumb: string | null; created_at: number; pinned: boolean };
 
+/** The clipboard history only records while the app runs, so it can start with Windows (hidden in the tray). */
+function StartWithWindows() {
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    import("@tauri-apps/plugin-autostart").then((m) => m.isEnabled()).then(setOn).catch(() => setOn(null));
+  }, []);
+  if (on === null) return null; // plain browser: nothing to switch
+  return (
+    <CheckField
+      label="Start with Windows"
+      checked={on}
+      onChange={(v) => {
+        import("@tauri-apps/plugin-autostart").then((m) => (v ? m.enable() : m.disable())).then(() => setOn(v)).catch(() => undefined);
+      }}
+    />
+  );
+}
+
 export function Clipboard() {
   const [items, setItems] = useState<Clip[]>([]);
   const [query, setQuery] = useState("");
@@ -40,7 +58,7 @@ export function Clipboard() {
     <>
       <Title
         title="Clipboard"
-        hint="The last 100 things you copied, text and images, kept on this computer. Anything a password manager marks as private is never recorded."
+        hint="The last 100 things you copied, text and images, kept on this computer. Press Ctrl+Shift+V in any program to open this list next to your cursor and paste from it. Anything a password manager marks as private is never recorded."
       />
       <div className="inline" style={{ marginBottom: 14 }}>
         <input
@@ -51,6 +69,7 @@ export function Clipboard() {
           onChange={(e) => setQuery(e.target.value)}
         />
         <button onClick={() => run(invoke("clip_set_paused", { paused: !paused }))}>{paused ? "Resume capture" : "Pause capture"}</button>
+        <StartWithWindows />
         <button onClick={() => run(invoke("clip_clear"))} disabled={items.every((i) => i.pinned)}>
           Clear unpinned
         </button>

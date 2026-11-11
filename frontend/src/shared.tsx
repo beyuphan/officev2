@@ -1,9 +1,9 @@
 import { useRef, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { cancelJob, runJob, type Job } from "./api";
+import { cancelJob, post, runJob, type Job } from "./api";
 
 export const pdfFilter = [{ name: "PDF", extensions: ["pdf"] }];
-export const imageFilter = [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif"] }];
+export const imageFilter = [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif", "avif", "heic", "heif", "ico"] }];
 export const videoFilter = [{ name: "Video", extensions: ["mp4", "mov", "mkv", "avi", "webm", "m4v"] }];
 export const audioFilter = [
   { name: "Audio / video", extensions: ["wav", "mp3", "m4a", "flac", "ogg", "opus", "aac", "mp4", "mkv", "mov", "webm"] },
@@ -84,6 +84,15 @@ export function Message({ m }: { m: Msg | null }) {
       {m.text}
     </p>
   ) : null;
+}
+
+/** "Not saved yet" / "All changes saved" / "No changes": the same words in every editor. */
+export function SaveState({ dirty, hasEdits }: { dirty: boolean; hasEdits: boolean }) {
+  return (
+    <span className={`savestate ${dirty ? "unsaved" : "saved"}`} role="status">
+      {dirty ? "Not saved yet" : hasEdits ? "All changes saved" : "No changes"}
+    </span>
+  );
 }
 
 export function Title({ title, hint }: { title: string; hint: string }) {
@@ -191,7 +200,7 @@ export function FolderField({
   );
 }
 
-/** Several files and/or folders as input. */
+/** Several files and/or folders as input. A folder is opened and its files are listed, so you can drop the ones you do not want. */
 export function InputsField({
   label,
   items,
@@ -203,33 +212,91 @@ export function InputsField({
   onChange: (v: string[]) => void;
   filters: { name: string; extensions: string[] }[];
 }) {
+  const [deep, setDeep] = useState(false);
+  const [note, setNote] = useState("");
   const add = (p: string | string[] | null) => {
     if (!p) return;
     const list = Array.isArray(p) ? p : [p];
     onChange([...items, ...list.filter((x) => !items.includes(x))]);
   };
+  async function addFolder() {
+    const dir = await open({ directory: true });
+    if (typeof dir !== "string") return;
+    try {
+      const exts = filters.flatMap((f) => f.extensions);
+      const r = await post<{ files: string[]; truncated: boolean }>("/files/folder-files", { folder: dir, extensions: exts, recursive: deep });
+      add(r.files);
+      setNote(r.files.length === 0 ? `No matching files in ${baseName(dir)}${deep ? "" : " (subfolders are not included)"}.` : r.truncated ? "Only the first 1000 files were added." : "");
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    }
+  }
   return (
     <div className="field">
       <span className="label">{label}</span>
       {items.length > 0 && (
-        <ul className="chips">
-          {items.map((p) => (
-            <li key={p}>
-              <span className="mono trunc" title={p}>
-                {p}
-              </span>
-              <button className="icon" aria-label={`Remove ${baseName(p)}`} onClick={() => onChange(items.filter((x) => x !== p))}>
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="chips">
+            {items.map((p) => (
+              <li key={p}>
+                <span className="mono trunc" title={p}>
+                  {p}
+                </span>
+                <button className="icon" aria-label={`Remove ${baseName(p)}`} onClick={() => onChange(items.filter((x) => x !== p))}>
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">
+            {`${items.length} file${items.length === 1 ? "" : "s"}`} ·{" "}
+            <button className="icon text" onClick={() => onChange([])}>
+              Clear all
+            </button>
+          </p>
+        </>
       )}
       <div className="actions tight">
         <button onClick={async () => add((await open({ multiple: true, filters })) as string[] | null)}>Add files…</button>
-        <button onClick={async () => add((await open({ directory: true })) as string | null)}>Add folder…</button>
+        <button onClick={addFolder}>Add folder…</button>
+        <label className="check inlinecheck">
+          <input type="checkbox" checked={deep} onChange={(e) => setDeep(e.target.checked)} /> Include subfolders
+        </label>
       </div>
+      {note && <p className="hint">{note}</p>}
     </div>
+  );
+}
+
+/** A font list that can also take a new font: choose “Add a font…”, pick a .ttf or .otf, and it is ready to use. */
+export function FontPicker({ value, fonts, onChange, onFonts, label = "Font" }: { value: string; fonts: string[]; onChange: (f: string) => void; onFonts: (all: string[]) => void; label?: string }) {
+  const [error, setError] = useState("");
+  async function pick(v: string) {
+    if (v !== "__add__") return onChange(v);
+    const file = await open({ multiple: false, filters: [{ name: "Fonts", extensions: ["ttf", "otf"] }] });
+    if (typeof file !== "string") return;
+    try {
+      const r = await post<{ family: string; fonts: string[] }>("/photo/fonts/add", { path: file });
+      onFonts(r.fonts);
+      onChange(r.family);
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+  const list = fonts.includes(value) ? fonts : [value, ...fonts];
+  return (
+    <>
+      <select aria-label={label} value={value} onChange={(e) => void pick(e.target.value)} title={error || undefined}>
+        {list.map((f) => (
+          <option key={f} value={f}>
+            {f}
+          </option>
+        ))}
+        <option value="__add__">＋ Add a font…</option>
+      </select>
+      {error && <span className="ctxhint" role="alert">{error}</span>}
+    </>
   );
 }
 
@@ -356,5 +423,38 @@ export function Table({ head, children, empty }: { head: ReactNode; children: Re
         )}
       </tbody>
     </table>
+  );
+}
+
+
+/** A small question with a few answers, centred over the window. */
+export function ConfirmDialog({
+  title,
+  text,
+  choices,
+  onCancel,
+  cancelLabel = "Keep editing",
+}: {
+  title: string;
+  text: string;
+  cancelLabel?: string;
+  choices: { label: string; kind?: "primary" | "danger"; onClick: () => void }[];
+  onCancel: () => void;
+}) {
+  return (
+    <div className="scrim" onMouseDown={onCancel}>
+      <div className="dialog" role="alertdialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === "Escape" && onCancel()}>
+        <h2>{title}</h2>
+        <p>{text}</p>
+        <div className="actions">
+          {choices.map((c) => (
+            <button key={c.label} className={c.kind ?? ""} onClick={c.onClick} autoFocus={c.kind === "primary"}>
+              {c.label}
+            </button>
+          ))}
+          <button onClick={onCancel}>{cancelLabel}</button>
+        </div>
+      </div>
+    </div>
   );
 }

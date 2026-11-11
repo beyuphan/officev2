@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { get, post } from "../api";
+import { post } from "../api";
 import {
   CheckField,
   FolderField,
-  InputsField,
   RunBar,
   Segmented,
   SelectField,
@@ -12,106 +11,17 @@ import {
   TextField,
   Title,
   baseName,
-  imageFilter,
   pdfFilter,
   useTask,
 } from "../shared";
 import { PagePreview, PdfSource, type Box, type PageData } from "../pdfview";
-import { ColorInput } from "../photoui";
 
 const stem = (p: string) => baseName(p).replace(/\.[^.]+$/, "");
 const num = (v: string, d: number) => (v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : d);
 
-function useFonts() {
-  const [fonts, setFonts] = useState<string[]>(["Arial"]);
-  useEffect(() => {
-    get<{ fonts: string[] }>("/photo/fonts").then((r) => setFonts(r.fonts)).catch(() => undefined);
-  }, []);
-  return fonts;
-}
-
 /* ------------------------------------------------------------------------------------------ */
 /* Page numbers, headers and footers                                                           */
 /* ------------------------------------------------------------------------------------------ */
-
-type StampItem = { position: string; text: string };
-const POSITIONS = [
-  { id: "top-left", label: "Top left" }, { id: "top-center", label: "Top center" }, { id: "top-right", label: "Top right" },
-  { id: "bottom-left", label: "Bottom left" }, { id: "bottom-center", label: "Bottom center" }, { id: "bottom-right", label: "Bottom right" },
-];
-
-export function PageNumbers({ onDone }: { onDone: () => void }) {
-  const fonts = useFonts();
-  const [file, setFile] = useState<string | null>(null);
-  const [items, setItems] = useState<StampItem[]>([{ position: "bottom-center", text: "{n} / {total}" }]);
-  const [font, setFont] = useState("Arial");
-  const [size, setSize] = useState("10");
-  const [margin, setMargin] = useState("28");
-  const [color, setColor] = useState("#444444");
-  const [startAt, setStartAt] = useState("1");
-  const [pages, setPages] = useState("");
-  const [page, setPage] = useState(1);
-  const task = useTask(onDone);
-
-  const settings = { items: items.filter((i) => i.text.trim()), font, size: num(size, 10), margin: num(margin, 28), color, start_at: Math.max(0, Math.round(num(startAt, 1))), pages: pages.trim() || null, bold: false, opacity: 1 };
-  const ready = file && settings.items.length > 0;
-  const update = (i: number, patch: Partial<StampItem>) => setItems((cur) => cur.map((it, k) => (k === i ? { ...it, ...patch } : it)));
-
-  async function go() {
-    if (!file) return;
-    const output = await save({ filters: pdfFilter, defaultPath: `${stem(file)}-numbered.pdf` });
-    if (output) await task.run("/pdf/stamp", { input: file, output, ...settings });
-  }
-
-  return (
-    <>
-      <Title title="Page numbers and headers" hint="Add page numbers, headers, footers or reference numbers to every page. The preview shows the page as it will look." />
-      <div className="split">
-        <div>
-          <PdfSource file={file} onPick={(f) => { setFile(f); setPage(1); }} peek={false} />
-          <span className="label">Texts</span>
-          {items.map((it, i) => (
-            <div key={i} className="stamprow">
-              <select aria-label="Position" value={it.position} onChange={(e) => update(i, { position: e.target.value })}>
-                {POSITIONS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-              <input aria-label="Text" className="mono" value={it.text} onChange={(e) => update(i, { text: e.target.value })} />
-              <button className="icon text" disabled={items.length === 1} onClick={() => setItems((cur) => cur.filter((_, k) => k !== i))}>
-                Remove
-              </button>
-            </div>
-          ))}
-          <div className="actions tight">
-            <button disabled={items.length >= 6} onClick={() => setItems((cur) => [...cur, { position: "top-right", text: "{file}" }])}>
-              Add text
-            </button>
-          </div>
-          <p className="hint">
-            Use <code>{"{n}"}</code> for the page number, <code>{"{n:04}"}</code> for zero padding (Bates numbers), <code>{"{total}"}</code>, <code>{"{file}"}</code> and <code>{"{date}"}</code>.
-          </p>
-          <div className="row3">
-            <SelectField id="pn-font" label="Font" value={font} onChange={setFont} options={fonts.map((f) => ({ id: f, label: f }))} />
-            <TextField id="pn-size" label="Size pt" type="number" mono value={size} onChange={setSize} />
-            <TextField id="pn-margin" label="Margin pt" type="number" mono value={margin} onChange={setMargin} />
-          </div>
-          <div className="row3">
-            <TextField id="pn-start" label="First number" type="number" mono value={startAt} onChange={setStartAt} />
-            <TextField id="pn-pages" label="Only pages (optional)" mono value={pages} onChange={setPages} hint="Example: 2-10" />
-            <ColorInput label="Color" value={color} onChange={setColor} />
-          </div>
-        </div>
-        <aside className="side">
-          <PagePreview file={file} page={page} onPage={setPage} extra={ready ? { url: "/pdf/stamp-preview", body: { input: file, page, width: 900, ...settings }, delay: 300 } : undefined} note={(d) => (d.stamped ? "This page will be stamped." : "This page is outside your selection.")} />
-        </aside>
-      </div>
-      <RunBar label="Save to…" busyLabel="Working…" disabled={!ready} onRun={go} task={task} />
-    </>
-  );
-}
 
 /* ------------------------------------------------------------------------------------------ */
 /* Crop and paper size                                                                         */
@@ -295,74 +205,6 @@ export function AddSplit({ onDone }: { onDone: () => void }) {
 /* Export content                                                                              */
 /* ------------------------------------------------------------------------------------------ */
 
-export function ExportContent({ onDone }: { onDone: () => void }) {
-  const [mode, setMode] = useState<"pages" | "images" | "text" | "fromimages">("pages");
-  const [file, setFile] = useState<string | null>(null);
-  const [outDir, setOutDir] = useState<string | null>(null);
-  const [dpi, setDpi] = useState("150");
-  const [fmt, setFmt] = useState("png");
-  const [pages, setPages] = useState("");
-  const [minSize, setMinSize] = useState("64");
-  const [tfmt, setTfmt] = useState("txt");
-  const [pics, setPics] = useState<string[]>([]);
-  const [paper, setPaper] = useState("fit");
-  const task = useTask(onDone);
-  const pageSpec = pages.trim() || null;
-
-  async function go() {
-    if (mode === "fromimages") {
-      const output = await save({ filters: pdfFilter, defaultPath: "images.pdf" });
-      if (output) await task.run("/pdf/from-images", { inputs: pics, output, page_size: paper });
-      return;
-    }
-    if (!file) return;
-    if (mode === "text") {
-      const output = await save({ filters: [{ name: tfmt, extensions: [tfmt] }], defaultPath: `${stem(file)}.${tfmt}` });
-      if (output) await task.run("/pdf/extract-text", { input: file, output, format: tfmt, pages: pageSpec });
-    } else if (mode === "pages") await task.run("/pdf/to-images", { input: file, out_dir: outDir, dpi: Math.round(num(dpi, 150)), format: fmt, pages: pageSpec });
-    else await task.run("/pdf/extract-images", { input: file, out_dir: outDir, pages: pageSpec, min_size: Math.round(num(minSize, 64)) });
-  }
-  const ready = mode === "fromimages" ? pics.length > 0 : file && (mode === "text" || !!outDir);
-
-  return (
-    <>
-      <Title title="Export content" hint="Turn pages into pictures, pull out the pictures or the text inside a PDF, or build a PDF from pictures." />
-      <Segmented
-        label="Action"
-        value={mode}
-        onChange={setMode}
-        options={[
-          { id: "pages", label: "Pages as pictures" },
-          { id: "images", label: "Pictures inside the PDF" },
-          { id: "text", label: "Text" },
-          { id: "fromimages", label: "Pictures to PDF" },
-        ]}
-      />
-      {mode === "fromimages" ? (
-        <>
-          <InputsField label="Pictures, in page order" items={pics} onChange={setPics} filters={imageFilter} />
-          <SelectField id="ec-paper" label="Page size" value={paper} onChange={setPaper} options={[{ id: "fit", label: "Same as the picture" }, ...["A4", "A3", "A5", "Letter", "Legal"].map((x) => ({ id: x, label: x }))]} />
-        </>
-      ) : (
-        <>
-          <PdfSource file={file} onPick={setFile} />
-          <TextField id="ec-pages" label="Only pages (optional)" mono value={pages} onChange={setPages} hint="Empty means all pages. Example: 1-3,7" />
-          {mode === "pages" && (
-            <div className="row3">
-              <SelectField id="ec-fmt" label="Format" value={fmt} onChange={setFmt} options={[{ id: "png", label: "PNG" }, { id: "jpg", label: "JPG" }]} />
-              <TextField id="ec-dpi" label="Resolution (dpi)" type="number" mono value={dpi} onChange={setDpi} hint="150 screen, 300 print" />
-            </div>
-          )}
-          {mode === "images" && <TextField id="ec-min" label="Skip pictures smaller than (px)" type="number" mono value={minSize} onChange={setMinSize} hint="Skips icons and decorations" />}
-          {mode === "text" && <SelectField id="ec-t" label="Format" value={tfmt} onChange={setTfmt} options={[{ id: "txt", label: "Plain text" }, { id: "md", label: "Markdown (one heading per page)" }, { id: "json", label: "JSON" }]} />}
-          {mode !== "text" && <FolderField label="Save in folder" value={outDir} onPick={setOutDir} />}
-        </>
-      )}
-      <RunBar label={mode === "text" || mode === "fromimages" ? "Save to…" : "Export"} busyLabel="Working…" disabled={!ready} onRun={go} task={task} />
-    </>
-  );
-}
-
 /* ------------------------------------------------------------------------------------------ */
 /* Forms                                                                                       */
 /* ------------------------------------------------------------------------------------------ */
@@ -518,47 +360,3 @@ export function Properties({ onDone }: { onDone: () => void }) {
 /* Flatten and grayscale                                                                       */
 /* ------------------------------------------------------------------------------------------ */
 
-export function Finish({ onDone }: { onDone: () => void }) {
-  const [mode, setMode] = useState<"flatten" | "gray">("flatten");
-  const [file, setFile] = useState<string | null>(null);
-  const [ann, setAnn] = useState(true);
-  const [forms, setForms] = useState(true);
-  const [links, setLinks] = useState(false);
-  const task = useTask(onDone);
-
-  async function go() {
-    if (!file) return;
-    const output = await save({ filters: pdfFilter, defaultPath: `${stem(file)}-${mode === "flatten" ? "flat" : "gray"}.pdf` });
-    if (!output) return;
-    if (mode === "flatten") await task.run("/pdf/flatten", { input: file, output, annotations: ann, forms, remove_links: links });
-    else await task.run("/pdf/grayscale", { input: file, output });
-  }
-
-  return (
-    <>
-      <Title
-        title="Flatten and grayscale"
-        hint={mode === "flatten" ? "Make comments, highlights and form answers part of the page, so nobody can change or remove them." : "Turn the pictures inside a PDF to black and white to make the file smaller and cheaper to print."}
-      />
-      <Segmented
-        label="Action"
-        value={mode}
-        onChange={setMode}
-        options={[
-          { id: "flatten", label: "Flatten" },
-          { id: "gray", label: "Grayscale pictures" },
-        ]}
-      />
-      <PdfSource file={file} onPick={setFile} />
-      {mode === "flatten" && (
-        <div className="checks">
-          <CheckField label="Annotations (highlights, shapes, notes)" checked={ann} onChange={setAnn} />
-          <CheckField label="Form fields" checked={forms} onChange={setForms} />
-          <CheckField label="Remove links" checked={links} onChange={setLinks} />
-        </div>
-      )}
-      {mode === "gray" && <p className="hint">Text and vector drawings keep their colors. Only embedded pictures change.</p>}
-      <RunBar label="Save to…" busyLabel="Working…" disabled={!file} onRun={go} task={task} />
-    </>
-  );
-}

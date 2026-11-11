@@ -1,107 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, ArrowRight, Copy, RotateCw, X } from "lucide-react";
-import { RunBar, Segmented, SourceField, TextField, Title, baseName, pdfFilter, useTask } from "../shared";
+import { CheckField, RunBar, TextField, Title, baseName, pdfFilter, useTask } from "../shared";
 import { PagePreview, PdfSource, thumbSrc, useRendered, useThumbs, type Box } from "../pdfview";
 import { describePlan } from "../lib/ranges";
 import { post } from "../api";
 
 const stem = (p: string) => baseName(p).replace(/\.[^.]+$/, "");
-
-/* ------------------------------------------------------------------------------------------ */
-/* Convert, compress, clean metadata                                                          */
-/* ------------------------------------------------------------------------------------------ */
-
-type Mode = "word" | "office" | "compress" | "metadata";
-
-const officeFilter = [
-  { name: "Office documents", extensions: ["doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "txt"] },
-];
-
-const MODES: Record<Mode, { label: string; hint: string; path: string; filter: typeof pdfFilter; ext: string; suffix: string }> = {
-  word: {
-    label: "PDF to Word",
-    hint: "Create an editable .docx. Simple documents convert well; complex layouts and scans will not be perfect.",
-    path: "/pdf/to-docx",
-    filter: pdfFilter,
-    ext: "docx",
-    suffix: "",
-  },
-  office: {
-    label: "Office to PDF",
-    hint: "Convert Word, Excel, PowerPoint and OpenDocument files with LibreOffice. LibreOffice must be installed.",
-    path: "/pdf/from-office",
-    filter: officeFilter,
-    ext: "pdf",
-    suffix: "",
-  },
-  compress: {
-    label: "Compress",
-    hint: "Shrink image-heavy PDFs by lowering image resolution and quality. Text stays sharp.",
-    path: "/pdf/compress",
-    filter: pdfFilter,
-    ext: "pdf",
-    suffix: "-small",
-  },
-  metadata: {
-    label: "Clean metadata",
-    hint: "Remove title, author, creator and other hidden fields from a PDF copy.",
-    path: "/pdf/clean-metadata",
-    filter: pdfFilter,
-    ext: "pdf",
-    suffix: "-clean",
-  },
-};
-
-export function Convert({ onDone }: { onDone: () => void }) {
-  const [mode, setMode] = useState<Mode>("word");
-  const [file, setFile] = useState<string | null>(null);
-  const [dpi, setDpi] = useState("120");
-  const [quality, setQuality] = useState("70");
-  const task = useTask(onDone);
-  const m = MODES[mode];
-
-  async function go() {
-    if (!file) return;
-    const output = await save({
-      filters: [{ name: m.ext.toUpperCase(), extensions: [m.ext] }],
-      defaultPath: `${stem(file)}${m.suffix}.${m.ext}`,
-    });
-    if (!output) return;
-    await task.run(m.path, {
-      input: file,
-      output,
-      ...(mode === "compress" ? { dpi: Number(dpi), quality: Number(quality) } : {}),
-    });
-  }
-
-  return (
-    <>
-      <Title title="Convert" hint={m.hint} />
-      <Segmented
-        label="Action"
-        value={mode}
-        onChange={(v) => {
-          setMode(v);
-          setFile(null);
-        }}
-        options={(Object.keys(MODES) as Mode[]).map((k) => ({ id: k, label: MODES[k].label }))}
-      />
-      {mode === "office" ? (
-        <SourceField label="Source" file={file} onPick={setFile} filters={m.filter} />
-      ) : (
-        <PdfSource file={file} onPick={setFile} />
-      )}
-      {mode === "compress" && (
-        <div className="row3">
-          <TextField id="c-dpi" label="Image DPI" type="number" mono value={dpi} onChange={setDpi} hint="72 screen, 150 office" />
-          <TextField id="c-q" label="JPEG quality" type="number" mono value={quality} onChange={setQuality} hint="1 to 100" />
-        </div>
-      )}
-      <RunBar label="Convert to…" busyLabel="Working…" disabled={!file} onRun={go} task={task} />
-    </>
-  );
-}
 
 /* ------------------------------------------------------------------------------------------ */
 /* Organize pages: a page manager                                                              */
@@ -270,12 +175,22 @@ export function Organize({ onDone }: { onDone: () => void }) {
 /* Redact: find, review on the page, remove                                                    */
 /* ------------------------------------------------------------------------------------------ */
 
+const REDACT_KINDS = [
+  { id: "email", label: "E-mail addresses" },
+  { id: "tckn", label: "TC kimlik numbers" },
+  { id: "iban", label: "IBAN" },
+  { id: "phone", label: "Phone numbers" },
+  { id: "card", label: "Card numbers" },
+];
+
 type Found = { pages: { page: number; width: number; height: number; hits: { term: string; rect: [number, number, number, number] }[] }[]; total: number; page_count: number };
 type Manual = { id: string; page: number; rect: [number, number, number, number] };
 
 export function Redact({ onDone }: { onDone: () => void }) {
   const [file, setFile] = useState<string | null>(null);
   const [terms, setTerms] = useState("");
+  const [kinds, setKinds] = useState<string[]>([]);
+  const [regex, setRegex] = useState("");
   const [pages, setPages] = useState("");
   const [found, setFound] = useState<Found | null>(null);
   const [off, setOff] = useState<Set<string>>(new Set());
@@ -285,6 +200,7 @@ export function Redact({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState("");
   const task = useTask(onDone);
   const list = terms.split("\n").map((t) => t.trim()).filter(Boolean);
+  const canFind = list.length > 0 || kinds.length > 0 || regex.trim().length > 0;
 
   useEffect(() => {
     setFound(null);
@@ -299,7 +215,7 @@ export function Redact({ onDone }: { onDone: () => void }) {
     setSearching(true);
     setError("");
     try {
-      const res = await post<Found>("/pdf/search", { input: file, terms: list, pages: pages.trim() || null });
+      const res = await post<Found>("/pdf/search", { input: file, terms: list, patterns: kinds, regex: regex.trim() || null, pages: pages.trim() || null });
       setFound(res);
       setOff(new Set());
       if (res.pages.length) setPage(res.pages[0].page);
@@ -354,9 +270,18 @@ export function Redact({ onDone }: { onDone: () => void }) {
               </label>
               <textarea id="r-terms" rows={4} value={terms} onChange={(e) => setTerms(e.target.value)} />
             </div>
+            <div className="field">
+              <span className="label">Or find private data automatically</span>
+              <div className="checks">
+                {REDACT_KINDS.map((k) => (
+                  <CheckField key={k.id} label={k.label} checked={kinds.includes(k.id)} onChange={(v) => setKinds((cur) => (v ? [...cur, k.id] : cur.filter((x) => x !== k.id)))} />
+                ))}
+              </div>
+            </div>
+            <TextField id="r-regex" label="Your own pattern (optional)" mono value={regex} onChange={setRegex} hint="Advanced: a regular expression, for example PRJ-\d+" />
             <TextField id="r-pages" label="Look only on pages (optional)" mono value={pages} onChange={setPages} hint="Empty means all pages" />
             <div className="actions tight">
-              <button disabled={list.length === 0 || searching} onClick={search}>
+              <button disabled={!canFind || searching} onClick={search}>
                 {searching ? "Searching…" : "Find"}
               </button>
             </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Message, RunBar, Segmented, SourceField, TextField, Title, baseName, imageFilter, pdfFilter, useTask } from "./shared";
+import { CheckField, Message, RunBar, Segmented, SourceField, TextField, Title, baseName, imageFilter, pdfFilter, useTask } from "./shared";
 import { PagePreview, PdfSource } from "./pdfview";
 
 function outName(file: string, suffix: string): string {
@@ -10,14 +10,15 @@ function outName(file: string, suffix: string): string {
 /* ---------- Protect: encrypt / unlock ---------- */
 
 export function Protect({ onDone }: { onDone: () => void }) {
-  const [mode, setMode] = useState<"encrypt" | "unlock">("encrypt");
+  const [mode, setMode] = useState<"encrypt" | "restrict" | "unlock">("encrypt");
+  const [allow, setAllow] = useState<string[]>(["print"]);
   const [file, setFile] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const { busy, message, run } = useTask(onDone);
 
   const mismatch = mode === "encrypt" && confirm !== "" && confirm !== password;
-  const ready = file && !busy && (mode === "unlock" || (password !== "" && password === confirm));
+  const ready = file && !busy && (mode === "unlock" || (password !== "" && (mode === "restrict" || password === confirm)));
 
   async function go() {
     if (!file) return;
@@ -26,7 +27,8 @@ export function Protect({ onDone }: { onDone: () => void }) {
       defaultPath: outName(file, mode === "encrypt" ? "-protected" : "-unlocked"),
     });
     if (!output) return;
-    await run(mode === "encrypt" ? "/pdf/encrypt" : "/pdf/unlock", { input: file, output, password });
+    if (mode === "restrict") await run("/pdf/restrict", { input: file, output, owner_password: password, allow });
+    else await run(mode === "encrypt" ? "/pdf/encrypt" : "/pdf/unlock", { input: file, output, password });
     setPassword("");
     setConfirm("");
   }
@@ -38,7 +40,9 @@ export function Protect({ onDone }: { onDone: () => void }) {
         hint={
           mode === "encrypt"
             ? "Save a copy that needs a password to open (AES-256). The original is not modified."
-            : "Save a copy without password or print/copy restrictions. You must know the password; officev2 does not break passwords."
+            : mode === "restrict"
+              ? "Anyone can open the copy, but only what you allow below works without your password. Good for contracts and handouts."
+              : "Save a copy without password or print/copy restrictions. You must know the password; officev2 does not break passwords."
         }
       />
       <Segmented
@@ -50,18 +54,34 @@ export function Protect({ onDone }: { onDone: () => void }) {
           setConfirm("");
         }}
         options={[
-          { id: "encrypt", label: "Encrypt" },
+          { id: "encrypt", label: "Password to open" },
+          { id: "restrict", label: "Limit printing and copying" },
           { id: "unlock", label: "Unlock" },
         ]}
       />
       <PdfSource file={file} onPick={setFile} />
       <TextField
         id="pw"
-        label={mode === "encrypt" ? "Password" : "Password (leave empty if the file only has restrictions)"}
+        label={mode === "encrypt" ? "Password" : mode === "restrict" ? "Your owner password (needed to lift the limits later)" : "Password (leave empty if the file only has restrictions)"}
         type="password"
         value={password}
         onChange={setPassword}
       />
+      {mode === "restrict" && (
+        <div className="field">
+          <span className="label">What people may do without the password</span>
+          <div className="checks">
+            {[
+              { id: "print", label: "Print" },
+              { id: "copy", label: "Copy text and pictures" },
+              { id: "edit", label: "Change the document" },
+              { id: "annotate", label: "Add notes and fill forms" },
+            ].map((a) => (
+              <CheckField key={a.id} label={a.label} checked={allow.includes(a.id)} onChange={(v) => setAllow((cur) => (v ? [...cur, a.id] : cur.filter((x) => x !== a.id)))} />
+            ))}
+          </div>
+        </div>
+      )}
       {mode === "encrypt" && (
         <TextField
           id="pw2"
@@ -74,7 +94,7 @@ export function Protect({ onDone }: { onDone: () => void }) {
       )}
       <div className="actions">
         <button className="primary" disabled={!ready} onClick={go}>
-          {busy ? "Working…" : mode === "encrypt" ? "Encrypt to…" : "Unlock to…"}
+          {busy ? "Working…" : mode === "encrypt" ? "Encrypt to…" : mode === "restrict" ? "Save limited copy to…" : "Unlock to…"}
         </button>
       </div>
       <Message m={message} />

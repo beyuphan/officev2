@@ -6,7 +6,7 @@ import { describe, type PdfItem } from "../lib/pdfOps";
 
 export type HandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "rot" | "p0" | "p1";
 
-export const RECTLIKE = ["rect", "ellipse", "highlight", "underline", "strike", "erase", "redact", "link"];
+export const RECTLIKE = ["rect", "ellipse", "highlight", "underline", "strike", "erase", "cover", "redact", "link", "field", "origimg"];
 export const SVG_TYPES = [...RECTLIKE, "line", "arrow", "ink"];
 
 export const num = (v: unknown, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : d);
@@ -80,8 +80,28 @@ export function VectorItem({ op, pw, onDown, onDouble, selected }: Common & { op
       );
     case "erase":
       return <rect {...events} x={x0} y={y0} width={w} height={h} fill="#ffffff" stroke={selected ? "none" : "rgb(27 31 36 / 0.25)"} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />;
+    case "cover":
+      return <rect {...events} x={x0} y={y0} width={w} height={h} fill={typeof op.bg === "string" ? op.bg : "#ffffff"} />;
     case "redact":
       return <rect {...events} x={x0} y={y0} width={w} height={h} fill="#000000" />;
+    case "origimg": {
+      const [ox0, oy0, ox1, oy1] = [num(op.ox0), num(op.oy0), num(op.ox1), num(op.oy1)];
+      return (
+        <g {...events}>
+          <rect x={ox0} y={oy0} width={ox1 - ox0} height={oy1 - oy0} fill={typeof op.bg === "string" ? op.bg : "#ffffff"} />
+          {!op.deleted && typeof op.previewData === "string" && <image href={op.previewData} x={x0} y={y0} width={w} height={h} preserveAspectRatio="none" />}
+          <rect x={x0} y={y0} width={w} height={h} fill="transparent" stroke={op.deleted ? "#c42b1c" : "rgb(37 99 235 / 0.6)"} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+        </g>
+      );
+    }
+    case "field":
+      return (
+        <g {...events}>
+          <rect x={x0} y={y0} width={w} height={h} fill="rgb(235 244 255 / 0.85)" stroke="#2563eb" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          {op.kind === "checkbox" && <path d={`M${x0 + w * 0.2},${y0 + h * 0.55} L${x0 + w * 0.42},${y0 + h * 0.78} L${x0 + w * 0.8},${y0 + h * 0.25}`} fill="none" stroke="#2563eb" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
+          {op.kind === "combobox" && <path d={`M${x1 - 12},${y0 + h * 0.4} l5,${h * 0.2} l5,-${h * 0.2}`} fill="#2563eb" />}
+        </g>
+      );
     case "link":
       return <rect {...events} x={x0} y={y0} width={w} height={h} fill="rgb(29 78 216 / 0.08)" stroke="#1d4ed8" strokeWidth={1} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />;
     case "line":

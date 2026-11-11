@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useModelGate } from "../modelgate";
 import {
-  CheckField,
   FolderField,
   InputsField,
   RunBar,
@@ -12,66 +12,6 @@ import {
   useTask,
   videoFilter,
 } from "../shared";
-import { get } from "../api";
-
-export function Images({ onDone }: { onDone: () => void }) {
-  const [inputs, setInputs] = useState<string[]>([]);
-  const [outDir, setOutDir] = useState<string | null>(null);
-  const [format, setFormat] = useState("webp");
-  const [quality, setQuality] = useState("80");
-  const [maxSide, setMaxSide] = useState("0");
-  const [strip, setStrip] = useState(true);
-  const task = useTask(onDone);
-
-  return (
-    <>
-      <Title
-        title="Images"
-        hint="Compress and convert images in bulk. Results go to a separate folder; your originals are never touched."
-      />
-      <InputsField label="Images or folders" items={inputs} onChange={setInputs} filters={imageFilter} />
-      <FolderField label="Save to folder" value={outDir} onPick={setOutDir} />
-      <div className="row3">
-        <SelectField
-          id="i-fmt"
-          label="Format"
-          value={format}
-          onChange={setFormat}
-          options={[
-            { id: "webp", label: "WebP" },
-            { id: "jpeg", label: "JPEG" },
-            { id: "png", label: "PNG" },
-            { id: "same", label: "Keep format" },
-          ]}
-        />
-        <TextField id="i-q" label="Quality" type="number" mono value={quality} onChange={setQuality} />
-        <TextField id="i-max" label="Longest side px" type="number" mono value={maxSide} onChange={setMaxSide} hint="0 keeps size" />
-      </div>
-      <CheckField
-        label="Remove metadata (EXIF, GPS, camera info)"
-        checked={strip}
-        onChange={setStrip}
-        hint="Orientation is applied first so photos stay upright."
-      />
-      <RunBar
-        label="Convert"
-        busyLabel="Converting…"
-        disabled={inputs.length === 0 || !outDir}
-        task={task}
-        onRun={() =>
-          task.run("/media/images", {
-            inputs,
-            out_dir: outDir,
-            format,
-            quality: Number(quality),
-            max_side: Number(maxSide),
-            strip_metadata: strip,
-          })
-        }
-      />
-    </>
-  );
-}
 
 export function Video({ onDone }: { onDone: () => void }) {
   const [inputs, setInputs] = useState<string[]>([]);
@@ -116,6 +56,7 @@ export function Background({ onDone }: { onDone: () => void }) {
   const [outDir, setOutDir] = useState<string | null>(null);
   const [model, setModel] = useState("u2netp");
   const task = useTask(onDone);
+  const gate = useModelGate();
 
   return (
     <>
@@ -139,59 +80,11 @@ export function Background({ onDone }: { onDone: () => void }) {
         busyLabel="Working…"
         disabled={inputs.length === 0 || !outDir}
         task={task}
-        onRun={() => task.run("/media/remove-background", { inputs, out_dir: outDir, model })}
+        onRun={async () => {
+          if (await gate.ensure(`rembg-${model}`)) await task.run("/media/remove-background", { inputs, out_dir: outDir, model });
+        }}
       />
-    </>
-  );
-}
-
-type ModelInfo = { id: string; installed: boolean };
-
-export function Upscale({ onDone, goToModels }: { onDone: () => void; goToModels: () => void }) {
-  const [inputs, setInputs] = useState<string[]>([]);
-  const [outDir, setOutDir] = useState<string | null>(null);
-  const [scale, setScale] = useState("4");
-  const [installed, setInstalled] = useState<boolean | null>(null);
-  const task = useTask(onDone);
-
-  useEffect(() => {
-    get<ModelInfo[]>("/models").then((m) => setInstalled(m.find((x) => x.id === "realesrgan")?.installed ?? false));
-  }, []);
-
-  return (
-    <>
-      <Title
-        title="Upscale"
-        hint="Enlarge low-resolution images 2 to 4 times with Real-ESRGAN on your graphics card. Results go to a separate folder."
-      />
-      {installed === false && (
-        <p className="msg bad">
-          The upscaler is a separate download (45 MB, a third-party program) and is not installed.{" "}
-          <button className="icon text" onClick={goToModels}>
-            Open Models
-          </button>
-        </p>
-      )}
-      <InputsField label="Images or folders" items={inputs} onChange={setInputs} filters={imageFilter} />
-      <FolderField label="Save to folder" value={outDir} onPick={setOutDir} />
-      <SelectField
-        id="u-scale"
-        label="Scale"
-        value={scale}
-        onChange={setScale}
-        options={[
-          { id: "2", label: "2×" },
-          { id: "3", label: "3×" },
-          { id: "4", label: "4×" },
-        ]}
-      />
-      <RunBar
-        label="Upscale"
-        busyLabel="Upscaling…"
-        disabled={inputs.length === 0 || !outDir || installed === false}
-        task={task}
-        onRun={() => task.run("/media/upscale", { inputs, out_dir: outDir, scale: Number(scale) })}
-      />
+      {gate.dialog}
     </>
   );
 }

@@ -30,15 +30,29 @@ async function engine(): Promise<EngineInfo> {
   return info;
 }
 
+/** The engine did not answer at all (it stopped), as opposed to answering with an error. */
+export class EngineDown extends Error {
+  constructor() {
+    super("The engine is not responding.");
+    this.name = "EngineDown";
+  }
+}
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { port, token } = await engine();
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-    ...init,
-    headers: {
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      ...init,
+      headers: {
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  } catch {
+    window.dispatchEvent(new Event("engine-down"));
+    throw new EngineDown();
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const detail = body.detail;
@@ -86,13 +100,25 @@ export const listHistory = () => get<HistoryEntry[]>("/history");
 export const undoEntry = (id: number) => post<{ moved_to?: string; restored_to?: string }>(`/history/${id}/undo`);
 export const cancelJob = (id: string) => post<{ cancelled: boolean }>(`/jobs/${id}/cancel`);
 
+/** One status check; a few missed answers in a row are waited out instead of losing track of the job. */
+async function pollJob(id: string): Promise<Job> {
+  for (let tries = 0; ; tries++) {
+    try {
+      return await get<Job>(`/jobs/${id}`);
+    } catch (e) {
+      if (!(e instanceof EngineDown) || tries >= 4) throw e;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
+
 /** Starts a job and polls it to the end, reporting each update (progress) along the way. */
 export async function runJob(path: string, body: unknown, onUpdate?: (job: Job) => void): Promise<Job> {
   let job = await post<Job>(path, body);
   onUpdate?.(job);
   while (job.state === "queued" || job.state === "running") {
     await new Promise((r) => setTimeout(r, 350));
-    job = await get<Job>(`/jobs/${job.id}`);
+    job = await pollJob(job.id);
     onUpdate?.(job);
   }
   return job;

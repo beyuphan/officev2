@@ -8,7 +8,7 @@ const n = (v: unknown, d = 0) => (typeof v === "number" && Number.isFinite(v) ? 
 const LABEL: Record<string, string> = {
   text: "Text", image: "Image", note: "Note", link: "Link", highlight: "Highlight", underline: "Underline",
   strike: "Strikethrough", squiggly: "Squiggly underline", rect: "Box", ellipse: "Oval", line: "Line", arrow: "Arrow",
-  ink: "Pen drawing", erase: "Erase", redact: "Redact (black out)",
+  ink: "Pen drawing", erase: "White-out", cover: "Text cover", redact: "Black out", field: "Form field", origimg: "Picture of the page",
 };
 
 export function describe(op: PdfOp): string {

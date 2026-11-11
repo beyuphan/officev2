@@ -1,3 +1,5 @@
+import { failed } from "../lib/notify";
+import { useModelGate } from "../modelgate";
 import { useCallback, useEffect, useState } from "react";
 import { del, get, post, runJob, type Job } from "../api";
 import {
@@ -21,6 +23,7 @@ export function Transcribe({ onDone }: { onDone: () => void }) {
   const [file, setFile] = useState<string | null>(null);
   const [outDir, setOutDir] = useState<string | null>(null);
   const [model, setModel] = useState("small");
+  const gate = useModelGate();
   const [language, setLanguage] = useState("");
   const [formats, setFormats] = useState<string[]>(["txt", "srt"]);
   const task = useTask(onDone);
@@ -64,8 +67,11 @@ export function Transcribe({ onDone }: { onDone: () => void }) {
         busyLabel="Transcribing…"
         disabled={!file || !outDir || formats.length === 0}
         task={task}
-        onRun={() => task.run("/ai/transcribe", { input: file, out_dir: outDir, model, language: language.trim() || null, formats })}
+        onRun={async () => {
+          if (await gate.ensure(`whisper-${model}`)) await task.run("/ai/transcribe", { input: file, out_dir: outDir, model, language: language.trim() || null, formats });
+        }}
       />
+      {gate.dialog}
     </>
   );
 }
@@ -87,11 +93,11 @@ export function Documents({ onDone }: { onDone: () => void }) {
   const task = useTask(onDone);
 
   const refresh = useCallback(() => {
-    get<Stats>("/ai/index").then(setStats).catch(() => undefined);
+    get<Stats>("/ai/index").then(setStats).catch(failed("Could not read the document index"));
   }, []);
   useEffect(() => {
     refresh();
-    get<Llm>("/ai/llm").then(setLlm).catch(() => undefined);
+    get<Llm>("/ai/llm").then(setLlm).catch(failed("Could not check the local assistant"));
   }, [refresh]);
 
   async function index() {

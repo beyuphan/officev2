@@ -7,7 +7,7 @@ describe("describe", () => {
     expect(describeOp({ type: "text", page: 1, text: "A line that is far too long to show" })).toBe("Text “A line that is far too…”");
     expect(describeOp({ type: "link", page: 1, uri: "https://example.com/path" })).toBe("Link to example.com/path");
     expect(describeOp({ type: "link", page: 1, target_page: 4 })).toBe("Link to page 4");
-    expect(describeOp({ type: "redact", page: 2 })).toBe("Redact (black out)");
+    expect(describeOp({ type: "redact", page: 2 })).toBe("Black out");
     expect(describeOp({ type: "ink", page: 2 })).toBe("Pen drawing");
   });
 });

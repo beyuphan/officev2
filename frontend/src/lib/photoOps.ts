@@ -5,17 +5,18 @@ export type Item = Op & { id: number };
 
 /** Edits run in this order whatever the order the user made them in, so e.g. a tone change never recolors text. */
 const STAGE: Record<string, number> = {
-  crop: 0, rotate: 0, straighten: 0, flip: 0, resize: 0,
-  blur: 1, remove_background: 1,
-  adjust: 2, levels: 2, auto: 2,
+  crop: 0, rotate: 0, straighten: 0, flip: 0, resize: 0, perspective: 0, lens: 0,
+  blur: 1, remove_background: 1, denoise: 1,
+  adjust: 2, levels: 2, auto: 2, curves: 2, hsl: 2, grade: 2, lut: 2,
   filter: 3,
   vignette: 4, grain: 4,
-  text: 5, shape: 5, overlay: 5,
-  border: 6, rounded: 6,
+  text: 5, shape: 5, overlay: 5, qr: 5,
+  inner_rounded: 5.5,
+  border: 6, rounded: 7,
 };
 
 /** Settings that exist once: setting them again replaces the old value. */
-export const SINGLETONS = new Set(["adjust", "filter", "vignette", "grain", "straighten", "resize", "border", "rounded", "levels", "remove_background", "auto"]);
+export const SINGLETONS = new Set(["adjust", "filter", "vignette", "grain", "straighten", "resize", "border", "rounded", "levels", "remove_background", "auto", "curves", "hsl", "perspective", "denoise", "grade", "lut", "lens", "inner_rounded", "qr"]);
 
 export const ADJUST_KEYS = ["brightness", "contrast", "exposure", "highlights", "shadows", "saturation", "vibrance", "warmth", "tint", "hue", "sharpness"] as const;
 
@@ -28,8 +29,6 @@ export function isNeutral(op: Op): boolean {
       return ADJUST_KEYS.every((k) => num(op[k]) === 0);
     case "filter":
       return !op.name || num(op.intensity, 1) <= 0;
-    case "vignette":
-      return num(op.strength) <= 0;
     case "grain":
       return num(op.amount) <= 0;
     case "straighten":
@@ -40,6 +39,33 @@ export function isNeutral(op: Op): boolean {
       return num(op.radius) <= 0;
     case "resize":
       return op.mode === "scale" && num(op.factor, 1) === 1;
+    case "curves": {
+      const chans = (op.channels ?? {}) as Record<string, number[][]>;
+      return Object.values(chans).every((pts) => pts.every(([x, y]) => Math.abs(x - y) < 0.5));
+    }
+    case "hsl": {
+      const bands = (op.bands ?? {}) as Record<string, Record<string, number>>;
+      return Object.values(bands).every((b) => Object.values(b).every((v) => v === 0));
+    }
+    case "perspective": {
+      const pts = (op.points ?? []) as number[][];
+      const home = [[0, 0], [1, 0], [1, 1], [0, 1]];
+      return pts.length === 4 && pts.every((p, i) => Math.abs(p[0] - home[i][0]) < 0.002 && Math.abs(p[1] - home[i][1]) < 0.002);
+    }
+    case "denoise":
+      return num(op.strength) <= 0;
+    case "grade":
+      return !op.shadows && !op.midtones && !op.highlights;
+    case "lut":
+      return !op.path || num(op.intensity, 1) <= 0;
+    case "lens":
+      return num(op.amount) === 0;
+    case "qr":
+      return !String(op.text ?? "").trim();
+    case "inner_rounded":
+      return num(op.radius) <= 0;
+    case "vignette":
+      return num(op.strength) === 0;
     case "levels":
       return num(op.black) === 0 && num(op.white, 255) === 255 && num(op.gamma, 1) === 1;
     default:
@@ -110,7 +136,7 @@ export function describe(op: Op): string {
       return `${kind === "pixelate" ? "Pixelate" : kind === "tiltshift" ? "Tilt-shift" : `${kind[0].toUpperCase()}${kind.slice(1)} blur`} (${where})`;
     }
     case "vignette":
-      return `Vignette ${pct(op.strength)}`;
+      return `${num(op.strength) < 0 ? "Lighten edges" : "Vignette"} ${pct(Math.abs(num(op.strength)))}`;
     case "grain":
       return `Grain ${pct(op.amount)}`;
     case "text":
@@ -122,7 +148,25 @@ export function describe(op: Op): string {
     case "border":
       return `Border ${num(op.width)} px`;
     case "rounded":
-      return `Rounded corners ${num(op.radius)} px`;
+      return `Frame corners ${num(op.radius)} px`;
+    case "inner_rounded":
+      return `Photo corners ${num(op.radius)} px`;
+    case "curves":
+      return "Curves";
+    case "hsl":
+      return `Colour mixer: ${Object.keys((op.bands ?? {}) as object).join(", ")}`;
+    case "perspective":
+      return "Perspective correction";
+    case "denoise":
+      return `Reduce noise ${num(op.strength)}`;
+    case "grade":
+      return "Colour grading";
+    case "lut":
+      return `Colour look: ${String(op.path ?? "").split(/[\/]/).pop()}`;
+    case "qr":
+      return "QR code";
+    case "lens":
+      return `Lens correction ${num(op.amount)}`;
     case "remove_background":
       return "Remove background";
     default:
