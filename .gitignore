@@ -11,6 +11,7 @@ dist/
 *.db-shm
 frontend/e2e/shots/
 frontend/e2e/walk-shots/
-frontend/src-tauri/engine-dist/
+frontend/src-tauri/engine-dist/*
+!frontend/src-tauri/engine-dist/README.txt
 scripts/.cache/
 .vscode/

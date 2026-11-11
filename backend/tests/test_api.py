@@ -4,6 +4,7 @@ import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 
+from localflow import extras
 from localflow.app import create_app
 from localflow.config import DEFAULT_ORIGINS, Settings
 from localflow.modules.pdf.ops import _unicode_font, parse_page_ranges
@@ -245,6 +246,8 @@ def _scanned_pdf(path, lines):
 
 @pytest.mark.parametrize("engine", ["rapidocr", "auto"])
 def test_ocr_makes_scanned_pdf_searchable(client, tmp_path, engine):
+    if engine == "rapidocr" and not extras.is_installed("ocr"):
+        pytest.skip("needs the extra OCR engine add-on")
     src, out = tmp_path / "scan.pdf", tmp_path / "ocr.pdf"
     _scanned_pdf(src, ["Invoice 2024 Total"])
     assert "Invoice" not in pymupdf.open(src)[0].get_text()
@@ -258,11 +261,18 @@ def test_ocr_makes_scanned_pdf_searchable(client, tmp_path, engine):
         assert len(d[0].get_images()) == 1  # original scan kept
 
 
-def test_ocr_keeps_turkish_characters(client, tmp_path):
-    from localflow.modules.pdf.ops import _windows_ocr_available
+def _windows_ocr_has_turkish() -> bool:
+    try:
+        from winrt.windows.media.ocr import OcrEngine
 
-    if not _windows_ocr_available():
-        pytest.skip("Windows OCR with a language pack is not available")
+        return any(l.language_tag.lower().startswith("tr") for l in OcrEngine.available_recognizer_languages)
+    except Exception:
+        return False
+
+
+def test_ocr_keeps_turkish_characters(client, tmp_path):
+    if not _windows_ocr_has_turkish():
+        pytest.skip("Windows OCR with the Turkish language pack is not available")
     src, out = tmp_path / "scan.pdf", tmp_path / "ocr.pdf"
     _scanned_pdf(src, ["Çalışma Öğrenci Şirket", "Güzel İstanbul ışığı"])
     job = post_job(client, "/pdf/ocr", {"input": str(src), "output": str(out), "engine": "windows"})

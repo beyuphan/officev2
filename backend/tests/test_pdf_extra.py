@@ -4,6 +4,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
+from localflow import extras
 from localflow.modules.pdf.ops import find_soffice
 from test_api import AUTH, client, make_pdf  # noqa: F401
 from test_files import post, post_job
@@ -80,6 +81,8 @@ def test_clean_metadata(client, tmp_path):
 
 
 def test_pdf_to_docx(client, tmp_path):
+    if not extras.is_installed("word"):
+        pytest.skip("needs the PDF to Word add-on")
     from docx import Document
 
     src, out = tmp_path / "s.pdf", tmp_path / "s.docx"

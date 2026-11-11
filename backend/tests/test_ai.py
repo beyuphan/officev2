@@ -6,6 +6,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
+from localflow import extras
 from localflow.modules.ai import llm
 from localflow.modules.ai.index import chunk_text
 from localflow.modules.ai.transcribe import to_srt, to_txt, to_vtt
@@ -67,6 +68,7 @@ def test_search_requires_embedding_model(client):
     assert post(client, "/ai/ask", {"question": "anything"}).status_code == 409
 
 
+@pytest.mark.skipif(not extras.is_installed("documents"), reason="needs the Ask your documents add-on")
 def test_index_stats_empty_and_validation(client, tmp_path):
     assert client.get("/ai/index", headers=AUTH).json() == {"documents": 0, "chunks": 0, "sources": []}
     assert post(client, "/ai/index", {"paths": [str(tmp_path / "nope")]}).status_code == 404

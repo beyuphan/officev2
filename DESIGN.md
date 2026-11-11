@@ -1,6 +1,6 @@
 # officev2 design system
 
-World: technical drawing sheet (ISO drafting). Mode: Operate. Source of truth is `frontend/src/App.css`.
+World: technical drawing sheet (ISO drafting). Mode: Operate. Source of truth is `frontend/src/App.css` (the colors, type and spacing are variables at the top of that file).
 
 ## Idea
 

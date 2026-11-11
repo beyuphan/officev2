@@ -75,6 +75,8 @@ def main() -> None:
 
     size = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file()) / 1e6
     (OUT / "VERSION").write_text(f"python {PY_VERSION}\n", encoding="utf-8")
+    # a tracked placeholder lives here too, so the desktop shell can be built from a fresh clone before this script ever ran
+    (OUT / "README.txt").write_text("Built by scripts/build_engine.py: Python and the core packages for the installer.\n", encoding="utf-8")
     print(f"engine folder ready: {OUT}  ({size:.0f} MB)")
 
 

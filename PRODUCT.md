@@ -1,7 +1,6 @@
 # Product
 
-
-> Drawn from README.md / README-tr.md / ARCHITECTURE.md. Every fact below is labeled by source, none was confirmed in conversation except Stack.
+> Drawn from README.md, README-tr.md and ARCHITECTURE.md. Every fact below is labeled by where it comes from.
 
 ## Platform
 
